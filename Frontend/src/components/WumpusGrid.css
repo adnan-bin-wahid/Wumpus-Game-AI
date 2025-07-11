@@ -1,22 +1,35 @@
 .wumpus-grid {
   display: grid;
   gap: 2px;
-  background-color: #2c3e50;
-  padding: 8px;
+  padding: 12px;
   border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+  background: url('/gameboard_background.jpg') center/cover;
+  position: relative;
+}
+
+.wumpus-grid::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
+  pointer-events: none;
 }
 
 .grid-row {
   display: flex;
-  gap: 8px;
+  gap: 2px;
 }
 
 .cell {
-  width: 50px;
-  height: 50px;
-  background-color: #fff;
-  border: 1px solid #34495e;
+  width: 60px;
+  height: 60px;
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(52, 73, 94, 0.5);
   border-radius: 4px;
   position: relative;
   transition: all 0.3s ease;
@@ -25,29 +38,64 @@
   flex-direction: column;
   justify-content: space-between;
   padding: 4px;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
-  font-size: 0.8em;
-  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .cell.covered {
-  background-color: #34495e;
-  color: #fff;
+  background: linear-gradient(145deg, #2c3e50, #34495e);
+  border: 2px solid #2c3e50;
+  box-shadow: 
+    inset 3px 3px 5px rgba(255, 255, 255, 0.1),
+    inset -3px -3px 5px rgba(0, 0, 0, 0.2),
+    0 2px 4px rgba(0, 0, 0, 0.3);
+  transform-style: preserve-3d;
+  perspective: 1000px;
+}
+
+.cell.covered::before {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  right: 5px;
+  bottom: 5px;
+  background: linear-gradient(135deg, 
+    transparent 0%, 
+    transparent 45%, 
+    rgba(255, 255, 255, 0.1) 45%, 
+    rgba(255, 255, 255, 0.1) 55%, 
+    transparent 55%, 
+    transparent 100%
+  );
+  background-size: 10px 10px;
+  pointer-events: none;
+}
+
+.cell.covered::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 3px;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    transparent 50%,
+    rgba(0, 0, 0, 0.1) 100%
+  );
+  pointer-events: none;
 }
 
 .cell.covered:hover {
-  background-color: #2c3e50;
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 
+    inset 3px 3px 5px rgba(255, 255, 255, 0.15),
+    inset -3px -3px 5px rgba(0, 0, 0, 0.25),
+    0 4px 8px rgba(0, 0, 0, 0.4);
+  background: linear-gradient(145deg, #34495e, #2c3e50);
 }
 
-.cell.covered .cell-coords {
-  color: #fff;
-  opacity: 0.7;
-}
-
-.cell:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-  border-color: #3498db;
+.cell.visited {
+  background-color: rgba(255, 255, 255, 0.85);
 }
 
 .cell-content {
@@ -57,57 +105,74 @@
   justify-content: center;
   font-size: 1.2rem;
   gap: 2px;
+  position: relative;
+  z-index: 1;
 }
 
 .cell-coords {
-  font-size: 0.6rem;
-  color: #7f8c8d;
+  font-size: 0.7rem;
+  color: rgba(0, 0, 0, 0.6);
   text-align: right;
   position: absolute;
-  bottom: 1px;
+  bottom: 2px;
   right: 2px;
+  font-family: 'Consolas', monospace;
+  pointer-events: none;
 }
 
-/* Cell States */
-.cell.visited {
-  background-color: #ecf0f1;
+.player-container {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.cell.player {
-  border-color: #2ecc71;
-  background-color: #edfaf1;
+.player-img {
+  width: 80%;
+  height: 80%;
+  object-fit: contain;
+  transition: transform 0.3s ease;
 }
 
+/* Cell state styles */
 .cell.wumpus {
-  border-color: #e74c3c;
-  background-color: #fdedec;
+  background-color: rgba(231, 76, 60, 0.2);
 }
 
 .cell.pit {
-  border-color: #8e44ad;
-  background-color: #f4ecf7;
+  background-color: rgba(142, 68, 173, 0.2);
 }
 
 .cell.gold {
-  border-color: #f1c40f;
-  background-color: #fef9e7;
+  background-color: rgba(241, 196, 15, 0.2);
 }
 
-/* Animation for the player */
+.cell.breeze {
+  background-color: rgba(52, 152, 219, 0.2);
+}
+
+.cell.stench {
+  background-color: rgba(230, 126, 34, 0.2);
+}
+
+/* Hover effects */
+.cell:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+/* Animation for player movement */
 @keyframes pulse {
   0% { transform: scale(1); }
   50% { transform: scale(1.1); }
   100% { transform: scale(1); }
 }
 
-.cell.player .cell-content {
+.cell.player .player-container {
   animation: pulse 2s infinite;
 }
-
-/* Hover effects for different states */
-.cell.wumpus:hover { border-color: #c0392b; }
-.cell.pit:hover { border-color: #6c3483; }
-.cell.gold:hover { border-color: #d4ac0d; }
 
 /* Responsive adjustments */
 @media (max-width: 600px) {

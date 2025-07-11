@@ -1,15 +1,17 @@
 .knowledge-base {
-  background: #fff;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
   padding: 20px;
   border-radius: 12px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
 }
 
 .knowledge-base h2 {
-  color: #2c3e50;
+  color: #fff;
   margin-bottom: 20px;
   font-size: 1.5em;
   text-align: center;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .percepts-grid {
@@ -24,17 +26,15 @@
   gap: 16px;
   padding: 12px;
   border-radius: 8px;
-  border: 2px solid #ecf0f1;
+  border: 2px solid rgba(255, 255, 255, 0.1);
   transition: all 0.3s ease;
-  background: #f8f9fa;
-  opacity: 0.6;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(5px);
 }
 
 .percept-card.active {
-  opacity: 1;
-  border-color: #3498db;
-  background: #ebf5fb;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-color: rgba(52, 152, 219, 0.8);
+  background: rgba(52, 152, 219, 0.2);
 }
 
 .percept-icon {
@@ -44,6 +44,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 .percept-info {
@@ -53,34 +54,36 @@
 .percept-info h3 {
   margin: 0;
   font-size: 1.1em;
-  color: #2c3e50;
+  color: #fff;
+  text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.3);
 }
 
 .percept-description {
   margin: 4px 0 0;
   font-size: 0.9em;
-  color: #7f8c8d;
+  color: rgba(255, 255, 255, 0.8);
 }
 
 /* Active state colors for different percepts */
 .percept-card.active:nth-child(1) {
-  border-color: #3498db;
-  background: #ebf5fb;
+  border-color: rgba(52, 152, 219, 0.8);
+  background: rgba(52, 152, 219, 0.2);
 }
 
 .percept-card.active:nth-child(2) {
-  border-color: #e74c3c;
-  background: #fdedec;
+  border-color: rgba(231, 76, 60, 0.8);
+  background: rgba(231, 76, 60, 0.2);
 }
 
 .percept-card.active:nth-child(3) {
-  border-color: #f1c40f;
-  background: #fef9e7;
+  border-color: rgba(241, 196, 15, 0.8);
+  background: rgba(241, 196, 15, 0.2);
 }
 
 /* Hover effects */
 .percept-card:hover {
   transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 /* Animation for active percepts */

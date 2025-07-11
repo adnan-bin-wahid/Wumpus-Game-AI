@@ -8,13 +8,13 @@ const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot }) => {
     const content = [];
     const cell = grid[y]?.[x];
     
-    if (!cell?.visited) {
-      return '❓';
-    }
-
-    // Add player emoji if this is the player's position
+    // Always show the player, even on unvisited cells
     if (x === playerPosition.x && y === playerPosition.y) {
-      content.push('🤠');
+      return content; // Return empty array to allow player image to be rendered separately
+    }
+    
+    if (!cell?.visited) {
+      return ''; // Return empty string for covered cells
     }
 
     // Only show contents for visited cells
@@ -54,25 +54,50 @@ const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot }) => {
     return classes.join(' ');
   };
 
+  const renderCell = (x, y) => {
+    const content = getCellContent(x, y);
+    const isPlayer = x === playerPosition.x && y === playerPosition.y;
+    const cell = grid[y]?.[x];
+    
+    return (
+      <div
+        key={`${x}-${y}`}
+        className={getCellClass(x, y)}
+        data-x={x}
+        data-y={y}
+      >
+        <div className="cell-content">
+          {content}
+          {isPlayer && (
+            <div className="player-container">
+              <img 
+                src="/player2.jpeg" 
+                alt="player"
+                className="player-img"
+                style={{ 
+                  transform: `rotate(${playerPosition.facing === 'right' ? 0 : 
+                                     playerPosition.facing === 'down' ? 90 : 
+                                     playerPosition.facing === 'left' ? 180 : 
+                                     270}deg)`,
+                }}
+              />
+            </div>
+          )}
+        </div>
+        {cell?.visited && (
+          <div className="cell-coords">
+            {/* ({x}, {y}) */}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="wumpus-grid">
       {Array.from({ length: size }, (_, y) => (
         <div key={y} className="grid-row">
-          {Array.from({ length: size }, (_, x) => (
-            <div
-              key={`${x}-${y}`}
-              className={getCellClass(x, y)}
-              data-x={x}
-              data-y={y}
-            >
-              <div className="cell-content">
-                {getCellContent(x, y)}
-              </div>
-              <div className="cell-coords">
-                ({x}, {y})
-              </div>
-            </div>
-          ))}
+          {Array.from({ length: size }, (_, x) => renderCell(x, y))}
         </div>
       ))}
     </div>
