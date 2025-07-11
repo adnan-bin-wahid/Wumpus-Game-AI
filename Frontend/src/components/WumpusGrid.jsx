@@ -1,8 +1,46 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import './WumpusGrid.css';
 
-const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot }) => {
+const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot, onMove }) => {
   const size = 10; // 10x10 grid
+
+  // Add keyboard event listeners
+  useEffect(() => {
+    const handleKeyPress = (event) => {
+      switch (event.key) {
+        case 'ArrowUp':
+        case 'w':
+        case 'W':
+          onMove('up');
+          break;
+        case 'ArrowDown':
+        case 's':
+        case 'S':
+          onMove('down');
+          break;
+        case 'ArrowLeft':
+        case 'a':
+        case 'A':
+          onMove('left');
+          break;
+        case 'ArrowRight':
+        case 'd':
+        case 'D':
+          onMove('right');
+          break;
+        default:
+          break;
+      }
+    };
+
+    // Add event listener
+    window.addEventListener('keydown', handleKeyPress);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [onMove]);
 
   const getCellContent = (x, y) => {
     const content = [];

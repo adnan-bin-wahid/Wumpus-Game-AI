@@ -421,6 +421,8 @@ function App() {
           <WumpusGrid
             grid={gameState.grid}
             playerPosition={gameState.playerPosition}
+            hasArrow={gameState.hasArrow}
+            onMove={handleMove}
           />
         </div>
         <div className="game-sidebar">
