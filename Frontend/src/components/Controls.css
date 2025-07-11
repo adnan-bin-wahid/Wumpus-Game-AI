@@ -1,0 +1,78 @@
+.controls {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.movement-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.horizontal-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.controls button {
+  width: 50px;
+  height: 50px;
+  font-size: 1.5rem;
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  background-color: #3498db;
+  color: white;
+}
+
+.controls button:disabled {
+  background-color: #95a5a6;
+  cursor: not-allowed;
+}
+
+.game-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.game-controls button {
+  width: 100%;
+  height: 40px;
+  font-size: 1rem;
+}
+
+.reset-btn {
+  background-color: #e74c3c !important;
+}
+
+.auto-btn {
+  background-color: #2ecc71 !important;
+}
+
+.pause-btn {
+  background-color: #f39c12 !important;
+}
+
+.file-input {
+  position: relative;
+}
+
+.file-label {
+  display: block;
+  padding: 10px;
+  background-color: #9b59b6;
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: center;
+}
+
+input[type="file"] {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}

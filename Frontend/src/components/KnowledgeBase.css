@@ -1,0 +1,95 @@
+.knowledge-base {
+  background: #fff;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.knowledge-base h2 {
+  color: #2c3e50;
+  margin-bottom: 20px;
+  font-size: 1.5em;
+  text-align: center;
+}
+
+.percepts-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.percept-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 2px solid #ecf0f1;
+  transition: all 0.3s ease;
+  background: #f8f9fa;
+  opacity: 0.6;
+}
+
+.percept-card.active {
+  opacity: 1;
+  border-color: #3498db;
+  background: #ebf5fb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.percept-icon {
+  font-size: 2em;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.percept-info {
+  flex: 1;
+}
+
+.percept-info h3 {
+  margin: 0;
+  font-size: 1.1em;
+  color: #2c3e50;
+}
+
+.percept-description {
+  margin: 4px 0 0;
+  font-size: 0.9em;
+  color: #7f8c8d;
+}
+
+/* Active state colors for different percepts */
+.percept-card.active:nth-child(1) {
+  border-color: #3498db;
+  background: #ebf5fb;
+}
+
+.percept-card.active:nth-child(2) {
+  border-color: #e74c3c;
+  background: #fdedec;
+}
+
+.percept-card.active:nth-child(3) {
+  border-color: #f1c40f;
+  background: #fef9e7;
+}
+
+/* Hover effects */
+.percept-card:hover {
+  transform: translateY(-2px);
+}
+
+/* Animation for active percepts */
+@keyframes pulse-subtle {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+.percept-card.active {
+  animation: pulse-subtle 2s infinite;
+}
