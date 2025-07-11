@@ -1,20 +1,24 @@
 import React from 'react';
 import './WumpusGrid.css';
 
-const WumpusGrid = ({ grid, playerPosition }) => {
+const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot }) => {
   const size = 10; // 10x10 grid
 
   const getCellContent = (x, y) => {
     const content = [];
+    const cell = grid[y]?.[x];
     
+    if (!cell?.visited) {
+      return '❓';
+    }
+
     // Add player emoji if this is the player's position
     if (x === playerPosition.x && y === playerPosition.y) {
       content.push('🤠');
     }
 
-    // Add cell-specific content (will be expanded later)
-    const cell = grid[y]?.[x];
-    if (cell) {
+    // Only show contents for visited cells
+    if (cell?.visited) {
       if (cell.wumpus) content.push('👾');
       if (cell.pit) content.push('🕳️');
       if (cell.gold) content.push('💰');
@@ -22,26 +26,29 @@ const WumpusGrid = ({ grid, playerPosition }) => {
       if (cell.stench) content.push('🦨');
     }
 
-    return content.join(' ');
+    return content.join(' ') || ' ';
   };
 
   const getCellClass = (x, y) => {
     let classes = ['cell'];
+    const cell = grid[y]?.[x];
+    
+    if (!cell?.visited) {
+      classes.push('covered');
+    }
     
     if (x === playerPosition.x && y === playerPosition.y) {
       classes.push('player');
     }
     
-    if (grid[y]?.[x]?.visited) {
+    if (cell?.visited) {
       classes.push('visited');
-    }
-    
-    // Add cell-specific classes (will be expanded later)
-    const cell = grid[y]?.[x];
-    if (cell) {
+      
       if (cell.wumpus) classes.push('wumpus');
       if (cell.pit) classes.push('pit');
       if (cell.gold) classes.push('gold');
+      if (cell.breeze) classes.push('breeze');
+      if (cell.stench) classes.push('stench');
     }
     
     return classes.join(' ');
