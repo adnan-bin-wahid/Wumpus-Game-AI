@@ -18,7 +18,7 @@ cd Wumpus-Game-AI
 
 2. Start the application using Docker Compose:
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 3. Open your browser and navigate to:
@@ -33,12 +33,12 @@ The application consists of two services:
 
 To stop the application:
 ```bash
-docker-compose down
+docker compose down
 ```
 
 To rebuild the containers after making changes:
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 ## Game Controls
