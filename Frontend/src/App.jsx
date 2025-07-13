@@ -362,7 +362,7 @@ function App() {
     
     // 2. If we have gold and at start position, climb out
     if (gameState.hasGold && x === 0 && y === 9) {
-      showGamePopup("Congratulations! You won! You got the gold and made it back safely!", goldSound);
+      showGamePopup("🎉 Congratulations! You won! 🏆\nYou got the gold and made it back safely! 🌟", goldSound);
       setSimulationState('stopped');
       return;
     }
@@ -591,7 +591,9 @@ function App() {
         isAlive: false,
       }));
       showGamePopup(
-        newCell.wumpus ? "Game Over! The Wumpus got you!" : "Game Over! You fell into a pit!",
+        newCell.wumpus 
+          ? "☠️ Game Over! The Wumpus got you! 👾" 
+          : "💀 Game Over! You fell into a pit! 🕳️",
         newCell.wumpus ? wumpusSound : pitSound
       );
       return;
@@ -604,7 +606,7 @@ function App() {
         playerPosition: newPosition,
         grid: newGrid,
       }));
-      showGamePopup("Congratulations! You won! You got the gold and made it back safely!", goldSound);
+      showGamePopup("🎉 Congratulations! You won! 🏆\nYou got the gold and made it back safely! 🌟", goldSound);
       return;
     }
 
@@ -720,7 +722,7 @@ function App() {
           setSimulationState('stopped');
           
         } catch (error) {
-          alert(`Error loading environment: ${error.message}`);
+          alert(`⚠️ Error loading environment: ${error.message}`);
         }
       };
       reader.readAsText(file);
@@ -859,7 +861,7 @@ function App() {
         ...prev,
         hasGold: true,
         grid: newGrid,
-        message: "You got the gold! Now head back to the start!"
+        message: "✨ You got the gold! Now head back to the start! 🏃"
       }));
     }
   };
