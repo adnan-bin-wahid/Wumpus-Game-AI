@@ -620,8 +620,110 @@ function App() {
   const handleFileUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
-      // TODO: Implement environment file loading
-      console.log('Loading environment file:', file.name);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const lines = e.target.result.trim().split('\n');
+          if (lines.length !== 10) {
+            throw new Error('Invalid file format: Must have exactly 10 lines');
+          }
+
+          const newGrid = Array(10).fill().map(() => Array(10).fill().map(() => ({
+            visited: false,
+            wumpus: false,
+            pit: false,
+            gold: false,
+            breeze: false,
+            stench: false,
+            glitter: false
+          })));
+
+          lines.forEach((line, y) => {
+            const chars = line.trim().split('');
+            if (chars.length !== 10) {
+              throw new Error(`Invalid line ${y + 1}: Must have exactly 10 characters`);
+            }
+
+            chars.forEach((char, x) => {
+              switch (char) {
+                case 'P':
+                  newGrid[y][x].pit = true;
+                  // Add breeze to adjacent cells
+                  getAdjacentCells(x, y).forEach(([adjX, adjY]) => {
+                    newGrid[adjY][adjX].breeze = true;
+                  });
+                  break;
+                case 'W':
+                  newGrid[y][x].wumpus = true;
+                  // Add stench to adjacent cells
+                  getAdjacentCells(x, y).forEach(([adjX, adjY]) => {
+                    newGrid[adjY][adjX].stench = true;
+                  });
+                  break;
+                case 'G':
+                  newGrid[y][x].gold = true;
+                  newGrid[y][x].glitter = true;
+                  break;
+                case '-':
+                  break;
+                default:
+                  throw new Error(`Invalid character at position (${x},${y}): ${char}`);
+              }
+            });
+          });
+
+          // Reset game state with new grid
+          setGameState(prev => ({
+            ...prev,
+            grid: newGrid,
+            playerPosition: { 
+              x: 0, 
+              y: 9,
+              facing: 'right'
+            },
+            hasGold: false,
+            hasArrow: true,
+            isAlive: true
+          }));
+
+          // Reset AI knowledge and state
+          setAiKnowledge(() =>
+            Array(10).fill().map(() => Array(10).fill().map(() => ({
+              safe: false,
+              possiblePit: false,
+              possibleWumpus: false,
+              visited: false,
+              wumpusKilled: false,
+              hasGold: false,
+              explored: false
+            })))
+          );
+
+          // Mark starting position as safe in AI knowledge
+          setAiKnowledge(prev => {
+            const newKnowledge = [...prev];
+            newKnowledge[9][0].safe = true;
+            newKnowledge[9][0].visited = true;
+            return newKnowledge;
+          });
+
+          setAiState({
+            hasShot: false,
+            wumpusKilled: false,
+            targetPosition: null,
+            plan: [],
+            currentPlanIndex: 0,
+            searchingForGold: true,
+            returningHome: false
+          });
+
+          setSimulationState('stopped');
+          
+        } catch (error) {
+          alert(`Error loading environment: ${error.message}`);
+        }
+      };
+      reader.readAsText(file);
     }
   };
 
