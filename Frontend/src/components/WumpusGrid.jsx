@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import './WumpusGrid.css';
 
-const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot, onMove }) => {
+const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot, onMove, isAIMode = false }) => {
   const size = 10; // 10x10 grid
 
   // Add keyboard event listeners
@@ -51,12 +51,16 @@ const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot, onMove }) 
       return content; // Return empty array to allow player image to be rendered separately
     }
     
-    if (!cell?.visited) {
-      return ''; // Return empty string for covered cells
+    // In AI mode, show all elements regardless of visited status
+    // In manual mode, only show contents for visited cells
+    const shouldShowContent = isAIMode || cell?.visited;
+    
+    if (!shouldShowContent) {
+      return ''; // Return empty string for covered cells in manual mode
     }
 
-    // Only show contents for visited cells
-    if (cell?.visited) {
+    // Show contents based on mode
+    if (shouldShowContent) {
       if (cell.wumpus) content.push('👾');
       if (cell.pit) content.push('🕳️');
       if (cell.gold) content.push('💰');
@@ -71,7 +75,9 @@ const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot, onMove }) 
     let classes = ['cell'];
     const cell = grid[y]?.[x];
     
-    if (!cell?.visited) {
+    // In AI mode, don't show covered state
+    // In manual mode, show covered state for unvisited cells
+    if (!isAIMode && !cell?.visited) {
       classes.push('covered');
     }
     
@@ -79,7 +85,11 @@ const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot, onMove }) 
       classes.push('player');
     }
     
-    if (cell?.visited) {
+    // In AI mode, always add element classes
+    // In manual mode, only add classes for visited cells
+    const shouldAddElementClasses = isAIMode || cell?.visited;
+    
+    if (shouldAddElementClasses) {
       classes.push('visited');
       
       if (cell.wumpus) classes.push('wumpus');
@@ -122,7 +132,7 @@ const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot, onMove }) 
             </div>
           )}
         </div>
-        {cell?.visited && (
+        {(isAIMode || cell?.visited) && (
           <div className="cell-coords">
             {/* ({x}, {y}) */}
           </div>

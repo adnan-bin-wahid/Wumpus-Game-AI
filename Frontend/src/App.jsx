@@ -170,7 +170,7 @@ function App() {
 
   // Heuristic function for A*
   function heuristic(a, b) {
-    return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+    return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); //sum of the absolute differences of their x and y coordinates.
   }
 
   // Enhanced A* Pathfinding
@@ -410,6 +410,16 @@ function App() {
       target = findBestExplorationTarget(aiKnowledge, { x, y });
       if (!target) {
         setSimulationState('paused');
+        setPopupContent({
+          message: (
+            <div className="text-center">
+              <div className="text-red-600 text-2xl font-bold mb-2">No safe place available.</div>
+              <div className="text-gray-500 text-lg">AI is stuck and cannot find a safe move.</div>
+            </div>
+          ),
+          sound: null
+        });
+        setShowPopup(true);
         console.log("AI stuck: No safe moves available");
         return;
       }
@@ -453,8 +463,8 @@ function App() {
     }
   }, [gameMode, simulationState, gameState, aiKnowledge, aiState]);
 
-  const showGamePopup = (message, sound) => {
-    setPopupContent({ message, sound });
+  const showGamePopup = (message, sound, type = 'default') => {
+    setPopupContent({ message, sound, type });
     setShowPopup(true);
     if (sound) {
       backgroundMusic.pause();
@@ -469,9 +479,9 @@ function App() {
   };
 
   // Popup component
-  const Popup = ({ message, onClose }) => (
+  const Popup = ({ message, onClose, type = 'default' }) => (
     <div className="popup-overlay">
-      <div className="popup-content">
+      <div className={`popup-content ${type === 'gold' ? 'popup-gold' : type === 'wumpus' ? 'popup-wumpus' : type === 'pit' ? 'popup-pit' : ''}`}>
         <div className="popup-header">
           <h2>{message}</h2>
         </div>
@@ -576,7 +586,7 @@ function App() {
         playerPosition: newPosition,
         grid: newGrid,
       }));
-      showGamePopup("You found the gold! Now head back to the start!", goldSound);
+      showGamePopup("🏆 You found the gold! ✨💰", goldSound, 'gold');
       updatePercepts(newPosition);
       return;
     }
@@ -594,7 +604,8 @@ function App() {
         newCell.wumpus 
           ? "☠️ Game Over! The Wumpus got you! 👾" 
           : "💀 Game Over! You fell into a pit! 🕳️",
-        newCell.wumpus ? wumpusSound : pitSound
+        newCell.wumpus ? wumpusSound : pitSound,
+        newCell.wumpus ? 'wumpus' : 'pit'
       );
       return;
     }
@@ -896,6 +907,7 @@ function App() {
             playerPosition={gameState.playerPosition}
             hasArrow={gameState.hasArrow}
             onMove={handleMove}
+            isAIMode={gameMode === 'ai'}
           />
         </div>
         <div className="game-sidebar">
@@ -992,7 +1004,8 @@ function App() {
       {showPopup && (
         <Popup 
           message={popupContent.message} 
-          onClose={handlePopupClose} 
+          onClose={handlePopupClose}
+          type={popupContent.type}
         />
       )}
     </div>
