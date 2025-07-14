@@ -103,7 +103,7 @@ function App() {
     })))
   );
 
-  // Add AI state tracking
+  // Add AI state tracking with loop detection
   const [aiState, setAiState] = useState({
     hasShot: false,
     wumpusKilled: false,
@@ -111,7 +111,9 @@ function App() {
     plan: [],
     currentPlanIndex: 0,
     searchingForGold: true,
-    returningHome: false
+    returningHome: false,
+    visitedPositions: [], // Track recent positions for loop detection
+    stuckCounter: 0 // Count how many times AI couldn't find new moves
   });
 
   // Initialize grid with game elements
@@ -149,15 +151,9 @@ function App() {
     grid: initializeGrid()
   });
 
-  // Utility: Find Gold Cell
-  function findGoldCell(grid) {
-    for (let y = 0; y < 10; y++) {
-      for (let x = 0; x < 10; x++) {
-        if (grid[y][x].gold) return { x, y };
-      }
-    }
-    return null;
-  }
+  // REMOVE CHEATING FUNCTION - AI should not know gold location!
+  // This function was giving the AI unfair advantage by revealing gold location
+  // function findGoldCell(grid) { ... } - REMOVED!
 
   // Utility: Get Direction
   function getDirection(from, to) {
@@ -173,17 +169,22 @@ function App() {
     return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); //sum of the absolute differences of their x and y coordinates.
   }
 
-  // Enhanced A* Pathfinding
+  // Realistic A* Pathfinding - NO CHEATING! AI only uses known information
   function aStar(start, goal, knowledge, allowRisky = false) {
     const open = [{ pos: start, path: [start], cost: 0 }];
     const closed = Array(10).fill().map(() => Array(10).fill(false));
     
     while (open.length > 0) {
-      // Sort by f(n) = g(n) + h(n)
+      // Sort by f(n) = g(n) + h(n) with safety priority
       open.sort((a, b) => {
         const fA = a.cost + heuristic(a.pos, goal);
         const fB = b.cost + heuristic(b.pos, goal);
-        return fA - fB;
+        
+        // Add safety penalty for dangerous cells
+        const safetyPenaltyA = getSafetyPenalty(a.pos, knowledge, allowRisky);
+        const safetyPenaltyB = getSafetyPenalty(b.pos, knowledge, allowRisky);
+        
+        return (fA + safetyPenaltyA) - (fB + safetyPenaltyB);
       });
       
       const current = open.shift();
@@ -200,11 +201,30 @@ function App() {
         if (closed[ny][nx]) return;
         
         const cell = knowledge[ny][nx];
-        const isSafe = cell.safe || cell.visited;
-        const isPossibleDanger = cell.possiblePit || (cell.possibleWumpus && !aiState.wumpusKilled);
         
-        // Allow movement if safe, or if we're allowing risky moves and it's not definitely dangerous
-        if (isSafe || (allowRisky && !isPossibleDanger)) {
+        // ULTRA-SAFE movement rules - NO RISKS!
+        let canMove = false;
+        
+        if (cell.visited) {
+          // Always allow movement to visited cells (they're proven safe)
+          canMove = true;
+        } else if (cell.safe) {
+          // Always allow movement to explicitly safe cells
+          canMove = true;
+        } else if (!cell.possiblePit && !cell.possibleWumpus && !cell.safe && !cell.visited) {
+          // Allow movement to completely unknown cells (not marked as any danger)
+          canMove = true;
+        } else if (allowRisky) {
+          // In risky mode, allow visited cells and be more lenient with unknowns
+          if (cell.visited) {
+            canMove = true;
+          } else if (!cell.possiblePit && !cell.possibleWumpus) {
+            canMove = true;
+          }
+        }
+        // NEVER allow movement to cells marked as possible pit or wumpus!
+        
+        if (canMove) {
           const newCost = current.cost + 1;
           const existingNode = open.find(node => node.pos.x === nx && node.pos.y === ny);
           
@@ -228,33 +248,133 @@ function App() {
     return null; // No path found
   }
 
-  // Apply logical inference to deduce safe/unsafe cells
+  // Enhanced safety penalty calculation - less strict but still safe
+  function getSafetyPenalty(pos, knowledge, allowRisky = false) {
+    const cell = knowledge[pos.y][pos.x];
+    let penalty = 0;
+    
+    // Visited cells get small penalty to discourage unnecessary backtracking
+    if (cell.visited) return 2;
+    
+    // Explicitly safe cells have no penalty
+    if (cell.safe) return 0;
+    
+    // High penalties for dangerous cells but not impossible
+    if (cell.possiblePit) penalty += allowRisky ? 15 : 100;
+    if (cell.possibleWumpus && !aiState.wumpusKilled) penalty += allowRisky ? 20 : 150;
+    
+    // Unknown cells get minimal penalty to encourage exploration
+    if (!cell.safe && !cell.visited && !cell.possiblePit && !cell.possibleWumpus) {
+      penalty += allowRisky ? 0.5 : 1;
+    }
+    
+    return penalty;
+  }
+
+  // Enhanced logical inference to deduce safe/unsafe cells
   function applyLogicalInference(knowledge) {
     let changed = true;
+    let iterations = 0;
+    const maxIterations = 5; // Prevent infinite loops
     
-    while (changed) {
+    while (changed && iterations < maxIterations) {
       changed = false;
+      iterations++;
       
       for (let y = 0; y < 10; y++) {
         for (let x = 0; x < 10; x++) {
           if (knowledge[y][x].visited) continue;
           
           const adjacentCells = getAdjacentCells(x, y);
+          const visitedAdjacentCells = adjacentCells.filter(([adjX, adjY]) => 
+            knowledge[adjY][adjX].visited
+          );
           
-          // Check if we can deduce this cell is safe through elimination
-          if (knowledge[y][x].possiblePit || knowledge[y][x].possibleWumpus) {
-            const riskyCells = adjacentCells.filter(([adjX, adjY]) => 
-              knowledge[adjY][adjX].possiblePit || knowledge[adjY][adjX].possibleWumpus
+          // Rule: If all visited adjacent cells have no breeze, this cell is safe from pits
+          if (visitedAdjacentCells.length > 0) {
+            const allAdjacentHaveNoBreeze = visitedAdjacentCells.every(([adjX, adjY]) => {
+              const adjCell = knowledge[adjY][adjX];
+              return adjCell.visited && !hasBreeze(adjX, adjY);
+            });
+            
+            if (allAdjacentHaveNoBreeze && knowledge[y][x].possiblePit) {
+              knowledge[y][x].possiblePit = false;
+              changed = true;
+            }
+            
+            // Rule: If all visited adjacent cells have no stench, this cell is safe from wumpus
+            const allAdjacentHaveNoStench = visitedAdjacentCells.every(([adjX, adjY]) => {
+              const adjCell = knowledge[adjY][adjX];
+              return adjCell.visited && !hasStench(adjX, adjY);
+            });
+            
+            if (allAdjacentHaveNoStench && knowledge[y][x].possibleWumpus) {
+              knowledge[y][x].possibleWumpus = false;
+              changed = true;
+            }
+            
+            // Update safety status
+            if (!knowledge[y][x].possiblePit && !knowledge[y][x].possibleWumpus && !knowledge[y][x].safe) {
+              knowledge[y][x].safe = true;
+              changed = true;
+            }
+          }
+          
+          // Advanced inference: If we detect breeze/stench in only one adjacent cell,
+          // and all other adjacent cells are safe, then this cell must contain the danger
+          const breezyAdjacentCells = visitedAdjacentCells.filter(([adjX, adjY]) => 
+            hasBreeze(adjX, adjY)
+          );
+          
+          const stenchyAdjacentCells = visitedAdjacentCells.filter(([adjX, adjY]) => 
+            hasStench(adjX, adjY)
+          );
+          
+          // If only one adjacent cell has breeze and others don't, this cell likely has a pit
+          if (breezyAdjacentCells.length > 0 && visitedAdjacentCells.length > breezyAdjacentCells.length) {
+            const safeCells = adjacentCells.filter(([adjX, adjY]) => 
+              knowledge[adjY][adjX].safe || knowledge[adjY][adjX].visited
             );
             
-            if (riskyCells.length === 1) {
-              // This cell might be safe if it's the only risky one
-              // More complex logic would be needed for full inference
+            if (safeCells.length === adjacentCells.length - 1) {
+              // This is likely the dangerous cell
+              if (!knowledge[y][x].possiblePit) {
+                knowledge[y][x].possiblePit = true;
+                knowledge[y][x].safe = false;
+                changed = true;
+              }
+            }
+          }
+          
+          // Same logic for wumpus
+          if (stenchyAdjacentCells.length > 0 && visitedAdjacentCells.length > stenchyAdjacentCells.length && !aiState.wumpusKilled) {
+            const safeCells = adjacentCells.filter(([adjX, adjY]) => 
+              knowledge[adjY][adjX].safe || knowledge[adjY][adjX].visited
+            );
+            
+            if (safeCells.length === adjacentCells.length - 1) {
+              if (!knowledge[y][x].possibleWumpus) {
+                knowledge[y][x].possibleWumpus = true;
+                knowledge[y][x].safe = false;
+                changed = true;
+              }
             }
           }
         }
       }
     }
+  }
+
+  // Helper function to check if a position has breeze (from game state)
+  function hasBreeze(x, y) {
+    if (!gameState?.grid || !isValidPosition(x, y)) return false;
+    return gameState.grid[y][x].breeze;
+  }
+
+  // Helper function to check if a position has stench (from game state)
+  function hasStench(x, y) {
+    if (!gameState?.grid || !isValidPosition(x, y)) return false;
+    return gameState.grid[y][x].stench;
   }
 
   // Enhanced AI Knowledge Update using First Order Logic
@@ -318,25 +438,47 @@ function App() {
     setAiKnowledge(newKnowledge);
   }
 
-  // Find the best safe cell to explore
+  // Enhanced exploration target finding - NO CHEATING! AI doesn't know gold location
   function findBestExplorationTarget(knowledge, currentPos) {
     const safeCells = [];
+    const unknownCells = [];
     
     for (let y = 0; y < 10; y++) {
       for (let x = 0; x < 10; x++) {
-        if (!knowledge[y][x].visited && knowledge[y][x].safe) {
+        if (!knowledge[y][x].visited) {
           const distance = heuristic(currentPos, { x, y });
-          safeCells.push({ x, y, distance });
+          const cellInfo = { x, y, distance };
+          
+          if (knowledge[y][x].safe) {
+            // Definitely safe cells are best
+            safeCells.push(cellInfo);
+          } else if (!knowledge[y][x].possiblePit && !knowledge[y][x].possibleWumpus) {
+            // Unknown cells that aren't marked as dangerous
+            unknownCells.push({ ...cellInfo, distance: distance + 1 }); // Small penalty for unknown
+          }
         }
       }
     }
     
-    // Sort by distance and return the closest safe cell
-    safeCells.sort((a, b) => a.distance - b.distance);
-    return safeCells.length > 0 ? { x: safeCells[0].x, y: safeCells[0].y } : null;
+    // Prioritize safe cells, then unknown cells
+    const allTargets = [...safeCells, ...unknownCells];
+    
+    // Sort by distance but add some randomness for more natural exploration
+    allTargets.sort((a, b) => {
+      const distDiff = a.distance - b.distance;
+      // If distances are close, add some randomness
+      if (Math.abs(distDiff) <= 2) {
+        return Math.random() - 0.5;
+      }
+      return distDiff;
+    });
+    
+    console.log(`Found ${safeCells.length} safe cells, ${unknownCells.length} unknown cells for exploration`);
+    
+    return allTargets.length > 0 ? { x: allTargets[0].x, y: allTargets[0].y } : null;
   }
 
-  // Enhanced AI Step with better decision making
+  // Balanced AI Step with proper exploration behavior and loop detection
   function aiStep() {
     if (!gameState.isAlive || simulationState === 'stopped') return;
     
@@ -348,13 +490,24 @@ function App() {
       glitter: cell.gold,
     };
     
-    // Update knowledge base
+    // Update knowledge base and position tracking
     updateAIKnowledge({ x, y }, percepts);
+    updateAIPositionTracking({ x, y });
     
-    // Decision making logic
+    console.log(`AI at position (${x}, ${y}), percepts:`, percepts);
+    console.log(`AI state:`, aiState);
+    
+    // Check for loop detection
+    const inLoop = detectLoop({ x, y });
+    if (inLoop) {
+      console.log("Loop detected! AI will be more aggressive in exploration.");
+    }
+    
+    // Decision making logic - BALANCED AI BEHAVIOR
     
     // 1. If glitter is perceived, grab the gold
     if (percepts.glitter && !gameState.hasGold) {
+      console.log("AI found gold, grabbing it!");
       handleGrab();
       setAiState(prev => ({ ...prev, searchingForGold: false, returningHome: true }));
       return;
@@ -362,27 +515,24 @@ function App() {
     
     // 2. If we have gold and at start position, climb out
     if (gameState.hasGold && x === 0 && y === 9) {
+      console.log("AI won the game!");
       showGamePopup("🎉 Congratulations! You won! 🏆\nYou got the gold and made it back safely! 🌟", goldSound);
       setSimulationState('stopped');
       return;
     }
     
-    // 3. If we smell stench and have arrow, consider shooting
+    // 3. Enhanced shooting strategy - only if confident about wumpus location
     if (percepts.stench && gameState.hasArrow && !aiState.hasShot) {
-      // Simple shooting strategy: shoot if we're confident about wumpus direction
-      const adjacentCells = getAdjacentCells(x, y);
-      const suspiciousCells = adjacentCells.filter(([adjX, adjY]) => 
-        aiKnowledge[adjY][adjX].possibleWumpus && !aiKnowledge[adjY][adjX].visited
-      );
-      
-      if (suspiciousCells.length === 1) {
-        const [targetX, targetY] = suspiciousCells[0];
-        const direction = getDirection({ x, y }, { x: targetX, y: targetY });
+      const shootingTarget = findBestShootingTarget(x, y);
+      if (shootingTarget) {
+        const direction = getDirection({ x, y }, shootingTarget);
+        console.log(`AI detected wumpus, aiming ${direction}`);
         
         if (gameState.playerPosition.facing !== direction) {
           handleMove(direction); // Turn to face the target
           return;
         } else {
+          console.log("AI shooting arrow!");
           handleShoot();
           setAiState(prev => ({ ...prev, hasShot: true, wumpusKilled: true }));
           return;
@@ -390,60 +540,226 @@ function App() {
       }
     }
     
-    // 4. Plan movement
-    let target = null;
-    
+    // 4. BALANCED EXPLORATION - more aggressive but still safe
     if (aiState.searchingForGold) {
-      // Look for gold or explore safely
-      target = findGoldCell(gameState.grid);
-      if (!target) {
-        // Find safe unexplored cell
-        target = findBestExplorationTarget(aiKnowledge, { x, y });
+      // First try to find a safe exploration target
+      const explorationTarget = findBestExplorationTarget(aiKnowledge, { x, y });
+      
+      if (explorationTarget) {
+        console.log("AI exploring unknown territory:", explorationTarget);
+        const safePath = aStar({ x, y }, explorationTarget, aiKnowledge, false);
+        
+        if (safePath && safePath.length > 1) {
+          const next = safePath[1];
+          
+          // Balanced safety check before moving
+          if (isMoveBalancedSafe(x, y, next.x, next.y)) {
+            const direction = getDirection({ x, y }, next);
+            console.log(`AI moving to explore: ${direction}`);
+            handleMove(direction);
+            return;
+          } else {
+            console.log(`ABORTING move to (${next.x}, ${next.y}) - failed balanced safety check!`);
+          }
+        }
       }
-    } else {
-      // Return home
-      target = { x: 0, y: 9 };
-    }
-    
-    if (!target) {
-      // No safe target found, try risky exploration as last resort
-      target = findBestExplorationTarget(aiKnowledge, { x, y });
-      if (!target) {
-        setSimulationState('paused');
-        setPopupContent({
-          message: (
-            <div className="text-center">
-              <div className="text-red-600 text-2xl font-bold mb-2">No safe place available.</div>
-              <div className="text-gray-500 text-lg">AI is stuck and cannot find a safe move.</div>
-            </div>
-          ),
-          sound: null
-        });
-        setShowPopup(true);
-        console.log("AI stuck: No safe moves available");
+      
+      // If no safe exploration targets, try balanced exploration move
+      const balancedMove = findBalancedExplorationMove(x, y);
+      if (balancedMove) {
+        const direction = getDirection({ x, y }, balancedMove);
+        console.log(`AI making balanced exploration move: ${direction}`);
+        handleMove(direction);
+        return;
+      }
+    } else if (aiState.returningHome) {
+      // Return to start position (0, 9) with gold
+      const homePath = aStar({ x, y }, { x: 0, y: 9 }, aiKnowledge, false);
+      if (homePath && homePath.length > 1) {
+        const next = homePath[1];
+        const direction = getDirection({ x, y }, next);
+        console.log(`AI returning home: ${direction}`);
+        handleMove(direction);
         return;
       }
     }
     
-    // Find path to target
-    const path = aStar({ x, y }, target, aiKnowledge, false);
+    // 5. Fallback: Make safe moves, prefer unvisited unless in loop
+    console.log("AI using fallback strategy with balanced safety");
+    const safeMoves = findSafeAdjacentMoves(x, y);
     
-    if (path && path.length > 1) {
-      const next = path[1];
-      const direction = getDirection({ x, y }, next);
+    if (safeMoves.length > 0) {
+      const chosenMove = safeMoves[0]; // Already prioritized by findSafeAdjacentMoves
+      const direction = getDirection({ x, y }, chosenMove);
+      
+      if (!aiKnowledge[chosenMove.y][chosenMove.x].visited) {
+        console.log(`AI making safe unvisited move: ${direction}`);
+      } else {
+        console.log(`AI making safe visited move (loop/stuck): ${direction}`);
+        incrementStuckCounter();
+      }
       handleMove(direction);
     } else {
-      // Try risky path as last resort
-      const riskyPath = aStar({ x, y }, target, aiKnowledge, true);
-      if (riskyPath && riskyPath.length > 1) {
-        const next = riskyPath[1];
-        const direction = getDirection({ x, y }, next);
+      // Emergency backtrack to any visited cell
+      const visitedMove = findAnyVisitedCell(x, y);
+      if (visitedMove) {
+        const direction = getDirection({ x, y }, visitedMove);
+        console.log(`AI emergency backtrack to visited cell: ${direction}`);
         handleMove(direction);
       } else {
-        setSimulationState('paused');
-        console.log("AI stuck: No path to target");
+        console.log("AI is completely stuck - no safe moves or backtrack options!");
+        handleStuckSituation(x, y);
       }
     }
+  }
+
+  // Loop detection to prevent endless wandering
+  function detectLoop(currentPos) {
+    const posKey = `${currentPos.x},${currentPos.y}`;
+    const recentPositions = aiState.visitedPositions.slice(-10); // Check last 10 positions
+    
+    // Count how many times we've been to this position recently
+    const visitCount = recentPositions.filter(pos => pos === posKey).length;
+    
+    return visitCount >= 3; // Loop detected if visited same position 3+ times recently
+  }
+
+  // Update AI position tracking
+  function updateAIPositionTracking(position) {
+    const posKey = `${position.x},${position.y}`;
+    setAiState(prev => ({
+      ...prev,
+      visitedPositions: [...prev.visitedPositions.slice(-20), posKey], // Keep last 20 positions
+      stuckCounter: 0 // Reset stuck counter when moving
+    }));
+  }
+
+  // Check if AI has been stuck (making only visited moves)
+  function incrementStuckCounter() {
+    setAiState(prev => ({
+      ...prev,
+      stuckCounter: prev.stuckCounter + 1
+    }));
+  }
+
+  // Helper function to assess current danger level
+  function assessCurrentDangerLevel(x, y) {
+    const adjacentCells = getAdjacentCells(x, y);
+    let dangerCount = 0;
+    
+    adjacentCells.forEach(([adjX, adjY]) => {
+      const cell = aiKnowledge[adjY][adjX];
+      if (cell.possiblePit) dangerCount += 2;
+      if (cell.possibleWumpus && !aiState.wumpusKilled) dangerCount += 3;
+      if (!cell.safe && !cell.visited && !cell.possiblePit && !cell.possibleWumpus) dangerCount += 1;
+    });
+    
+    return dangerCount;
+  }
+
+  // Helper function to check if all adjacent cells are dangerous
+  function areAllAdjacentCellsDangerous(x, y) {
+    const adjacentCells = getAdjacentCells(x, y);
+    return adjacentCells.every(([adjX, adjY]) => {
+      const cell = aiKnowledge[adjY][adjX];
+      return (cell.possiblePit || (cell.possibleWumpus && !aiState.wumpusKilled)) && !cell.visited;
+    });
+  }
+
+  // Helper function to find the nearest safe cell (visited or explicitly safe)
+  function findNearestSafeCell(currentX, currentY) {
+    const safeCells = [];
+    
+    for (let y = 0; y < 10; y++) {
+      for (let x = 0; x < 10; x++) {
+        const cell = aiKnowledge[y][x];
+        if ((cell.visited || cell.safe) && !(x === currentX && y === currentY)) {
+          const distance = heuristic({ x: currentX, y: currentY }, { x, y });
+          safeCells.push({ x, y, distance });
+        }
+      }
+    }
+    
+    safeCells.sort((a, b) => a.distance - b.distance);
+    return safeCells.length > 0 ? { x: safeCells[0].x, y: safeCells[0].y } : null;
+  }
+
+  // Helper function to find a safe adjacent move
+  function findSafeAdjacentMove(x, y) {
+    const adjacentCells = getAdjacentCells(x, y);
+    const safeMoves = adjacentCells.filter(([adjX, adjY]) => {
+      const cell = aiKnowledge[adjY][adjX];
+      return cell.visited || cell.safe;
+    });
+    
+    if (safeMoves.length > 0) {
+      return { x: safeMoves[0][0], y: safeMoves[0][1] };
+    }
+    return null;
+  }
+
+  // Helper function to find any visited cell for emergency backtracking
+  function findAnyVisitedCell(currentX, currentY) {
+    const adjacentCells = getAdjacentCells(currentX, currentY);
+    const visitedAdjacent = adjacentCells.filter(([adjX, adjY]) => {
+      return aiKnowledge[adjY][adjX].visited;
+    });
+    
+    if (visitedAdjacent.length > 0) {
+      return { x: visitedAdjacent[0][0], y: visitedAdjacent[0][1] };
+    }
+    return null;
+  }
+
+  // Helper function to handle stuck situations
+  function handleStuckSituation(x, y) {
+    console.log("AI is truly stuck, pausing simulation");
+    setSimulationState('paused');
+    setPopupContent({
+      message: (
+        <div className="text-center">
+          <div className="text-red-600 text-2xl font-bold mb-2">AI is stuck!</div>
+          <div className="text-gray-500 text-lg">Position: ({x}, {y})</div>
+          <div className="text-gray-500 text-lg">No safe moves available. Consider restarting.</div>
+        </div>
+      ),
+      sound: null
+    });
+    setShowPopup(true);
+  }
+
+  // Helper function to find the best shooting target
+  function findBestShootingTarget(currentX, currentY) {
+    const adjacentCells = getAdjacentCells(currentX, currentY);
+    const suspiciousCells = adjacentCells.filter(([adjX, adjY]) => 
+      aiKnowledge[adjY][adjX].possibleWumpus && !aiKnowledge[adjY][adjX].visited
+    );
+    
+    // Only shoot if we're confident about wumpus location
+    if (suspiciousCells.length === 1) {
+      return { x: suspiciousCells[0][0], y: suspiciousCells[0][1] };
+    }
+    
+    return null;
+  }
+
+  // Helper function to find all safe cells for movement
+  function findAllSafeCells(knowledge, currentPos) {
+    const safeCells = [];
+    
+    for (let y = 0; y < 10; y++) {
+      for (let x = 0; x < 10; x++) {
+        if ((knowledge[y][x].safe || knowledge[y][x].visited) && 
+            !(x === currentPos.x && y === currentPos.y)) {
+          const distance = heuristic(currentPos, { x, y });
+          safeCells.push({ x, y, distance });
+        }
+      }
+    }
+    
+    // Sort by distance
+    safeCells.sort((a, b) => a.distance - b.distance);
+    return safeCells;
   }
 
   // Enhanced useEffect for AI stepping
@@ -481,7 +797,7 @@ function App() {
   // Popup component
   const Popup = ({ message, onClose, type = 'default' }) => (
     <div className="popup-overlay">
-      <div className={`popup-content ${type === 'gold' ? 'popup-gold' : type === 'wumpus' ? 'popup-wumpus' : type === 'pit' ? 'popup-pit' : ''}`}>
+      <div className={`popup-content ${type === 'gold' ? 'popup-gold' : ''}`}>
         <div className="popup-header">
           <h2>{message}</h2>
         </div>
@@ -561,6 +877,22 @@ function App() {
           willMove = true;
         }
         break;
+    }
+
+    // CRITICAL SAFETY CHECK for AI mode: Never allow AI to move to dangerous cells
+    if (gameMode === 'ai' && willMove) {
+      const targetCell = gameState.grid[newPosition.y][newPosition.x];
+      if (targetCell.pit || targetCell.wumpus) {
+        console.log(`EMERGENCY STOP: AI tried to move to dangerous cell (${newPosition.x}, ${newPosition.y})`);
+        console.log('Cell contents:', targetCell);
+        setSimulationState('paused');
+        showGamePopup(
+          `⚠️ SAFETY OVERRIDE ACTIVATED!\nAI attempted to move to a dangerous cell at (${newPosition.x}, ${newPosition.y})\nSimulation paused for safety.`,
+          null,
+          'wumpus'
+        );
+        return;
+      }
     }
 
     // Play transition sound if the player will actually move
@@ -763,7 +1095,9 @@ function App() {
       plan: [],
       currentPlanIndex: 0,
       searchingForGold: true,
-      returningHome: false
+      returningHome: false,
+      visitedPositions: [],
+      stuckCounter: 0
     });
     setAiKnowledge(() =>
       Array(10).fill().map(() => Array(10).fill().map(() => ({
@@ -875,9 +1209,123 @@ function App() {
         message: "✨ You got the gold! Now head back to the start! 🏃"
       }));
     }
-  };
+  };  // BALANCED safe moves finder - prefers unvisited but allows visited when needed
+  function findSafeAdjacentMoves(x, y) {
+    const adjacentCells = getAdjacentCells(x, y);
+    const allSafeMoves = adjacentCells.filter(([adjX, adjY]) => {
+      return isMoveBalancedSafe(x, y, adjX, adjY);
+    });
+    
+    const safeMoves = allSafeMoves.map(([adjX, adjY]) => ({ x: adjX, y: adjY }));
+    
+    // Separate unvisited and visited safe moves
+    const unvisitedSafeMoves = safeMoves.filter(move => !aiKnowledge[move.y][move.x].visited);
+    const visitedSafeMoves = safeMoves.filter(move => aiKnowledge[move.y][move.x].visited);
+    
+    console.log(`Safe moves from (${x}, ${y}): ${unvisitedSafeMoves.length} unvisited, ${visitedSafeMoves.length} visited`);
+    
+    // Return unvisited moves if available, otherwise visited moves
+    return unvisitedSafeMoves.length > 0 ? unvisitedSafeMoves : visitedSafeMoves;
+  }
 
+  // Helper function to choose the best safe move (prefer unexplored safe cells)
+  function chooseBestSafeMove(safeMoves, currentX, currentY) {
+    // Prioritize unvisited safe cells over visited ones
+    const unvisitedSafeMoves = safeMoves.filter(move => !aiKnowledge[move.y][move.x].visited);
+    
+    if (unvisitedSafeMoves.length > 0) {
+      return unvisitedSafeMoves[0];
+    }
+    
+    // If all safe moves are visited, choose the closest one
+    safeMoves.sort((a, b) => {
+      const distA = heuristic({ x: currentX, y: currentY }, a);
+      const distB = heuristic({ x: currentX, y: currentY }, b);
+      return distA - distB;
+    });
+    
+    return safeMoves[0];
+  }
 
+  // BALANCED exploration for unknown territory - more aggressive but still safe
+  function findBalancedExplorationMove(x, y) {
+    const adjacentCells = getAdjacentCells(x, y);
+    
+    // Find all safe moves using balanced validation
+    const balancedSafeMoves = adjacentCells.filter(([adjX, adjY]) => {
+      return isMoveBalancedSafe(x, y, adjX, adjY);
+    });
+    
+    // Among safe moves, strongly prefer unvisited ones
+    const unvisitedSafeMoves = balancedSafeMoves.filter(([adjX, adjY]) => {
+      return !aiKnowledge[adjY][adjX].visited;
+    });
+    
+    if (unvisitedSafeMoves.length > 0) {
+      // Choose the unvisited safe move that's closest to unexplored areas
+      const bestMove = unvisitedSafeMoves.reduce((best, [adjX, adjY]) => {
+        const unexploredNeighbors = getAdjacentCells(adjX, adjY).filter(([nx, ny]) => 
+          !aiKnowledge[ny][nx].visited
+        ).length;
+        
+        if (!best || unexploredNeighbors > best.unexploredCount) {
+          return { x: adjX, y: adjY, unexploredCount: unexploredNeighbors };
+        }
+        return best;
+      }, null);
+      
+      console.log(`Balanced exploration move selected: (${bestMove.x}, ${bestMove.y})`);
+      return { x: bestMove.x, y: bestMove.y };
+    }
+    
+    // If no unvisited safe moves and we're in a loop, allow visiting a safe cell
+    if (detectLoop({ x, y }) || aiState.stuckCounter > 3) {
+      const visitedSafeMoves = balancedSafeMoves.filter(([adjX, adjY]) => {
+        return aiKnowledge[adjY][adjX].visited;
+      });
+      
+      if (visitedSafeMoves.length > 0) {
+        const [adjX, adjY] = visitedSafeMoves[0];
+        console.log(`Loop detected, allowing visited safe move: (${adjX}, ${adjY})`);
+        return { x: adjX, y: adjY };
+      }
+    }
+    
+    console.log("No balanced exploration moves available");
+    return null;
+  }
+
+  // BALANCED move validation - maintains safety but allows reasonable exploration
+  function isMoveBalancedSafe(fromX, fromY, toX, toY) {
+    const targetCell = aiKnowledge[toY][toX];
+    
+    // Always safe: visited or explicitly marked safe
+    if (targetCell.visited || targetCell.safe) {
+      return true;
+    }
+    
+    // NEVER safe: confirmed dangerous cells
+    if (targetCell.possiblePit || (targetCell.possibleWumpus && !aiState.wumpusKilled)) {
+      console.log(`REJECTING move to (${toX}, ${toY}) - possible danger detected!`);
+      return false;
+    }
+    
+    // Unknown cells are generally safe if we're not currently sensing danger
+    const currentCell = gameState.grid[fromY][fromX];
+    if (currentCell.breeze || currentCell.stench) {
+      // If sensing danger, be more careful but allow unknown cells adjacent to safe areas
+      const adjacentSafeCells = getAdjacentCells(toX, toY).filter(([adjX, adjY]) => {
+        const adjCell = aiKnowledge[adjY][adjX];
+        return adjCell.visited && !gameState.grid[adjY][adjX].breeze && !gameState.grid[adjY][adjX].stench;
+      });
+      
+      // Allow move if at least one adjacent cell is known safe with no danger signals
+      return adjacentSafeCells.length > 0 || targetCell.safe;
+    }
+    
+    // Unknown cells are okay if we're not sensing immediate danger
+    return !targetCell.possiblePit && !targetCell.possibleWumpus;
+  }
 
   if (!gameMode) {
     return (
