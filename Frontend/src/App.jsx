@@ -469,20 +469,33 @@ function App() {
   };
 
   // Popup component
-  const Popup = ({ message, onClose }) => (
-    <div className="popup-overlay">
-      <div className="popup-content">
-        <div className="popup-header">
-          <h2>{message}</h2>
-        </div>
-        <div className="popup-actions">
-          <button className="control-btn restart popup-restart" onClick={onClose}>
-            🔄 Restart Game
-          </button>
+  const Popup = ({ message, onClose }) => {
+    // Determine the popup type based on the message content
+    let popupType = 'gold';
+    if (message.includes('Wumpus')) {
+      popupType = 'wumpus';
+    } else if (message.includes('pit')) {
+      popupType = 'pit';
+    }
+
+    return (
+      <div className="popup-overlay">
+        <div className={`popup-content ${popupType}`}>
+          <div className="popup-header">
+            <h2>{message}</h2>
+          </div>
+          <div className="popup-actions">
+            <button 
+              className={`popup-restart ${popupType}`} 
+              onClick={onClose}
+            >
+              🔄 Restart Game
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Update percepts when player moves
   const updatePercepts = (position) => {

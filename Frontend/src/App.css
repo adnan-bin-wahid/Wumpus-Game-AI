@@ -322,100 +322,128 @@ h1 {
   color: white;
 }
 
-/* Popup Styles */
+/* Popup Styles - Base */
 .popup-overlay {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0, 0, 0, 0.85);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
-  backdrop-filter: blur(5px);
+  backdrop-filter: blur(8px);
   animation: fadeIn 0.3s ease-in-out;
 }
 
+/* Gold Victory Popup */
+.popup-content.gold {
+  background: linear-gradient(135deg, #FFD700, #FFA500, #FF8C00);
+  padding: 40px;
+  border-radius: 25px;
+  box-shadow: 0 0 50px rgba(255, 215, 0, 0.5),
+              inset 0 0 30px rgba(255, 255, 255, 0.3);
+  border: 3px solid rgba(255, 223, 0, 0.5);
+}
+
+.popup-content.gold h2 {
+  color: #fff;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4),
+               0 0 20px rgba(255, 223, 0, 0.6);
+}
+
+/* Wumpus Death Popup */
+.popup-content.wumpus {
+  background: linear-gradient(135deg, #8B0000, #FF0000, #DC143C);
+  padding: 40px;
+  border-radius: 25px;
+  box-shadow: 0 0 50px rgba(139, 0, 0, 0.5),
+              inset 0 0 30px rgba(255, 255, 255, 0.1);
+  border: 3px solid rgba(220, 20, 60, 0.5);
+}
+
+.popup-content.wumpus h2 {
+  color: #fff;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4),
+               0 0 20px rgba(255, 0, 0, 0.6);
+}
+
+/* Pit Death Popup */
+.popup-content.pit {
+  background: linear-gradient(135deg, #2C3E50, #34495E, #7F8C8D);
+  padding: 40px;
+  border-radius: 25px;
+  box-shadow: 0 0 50px rgba(44, 62, 80, 0.5),
+              inset 0 0 30px rgba(255, 255, 255, 0.1);
+  border: 3px solid rgba(127, 140, 141, 0.5);
+}
+
+.popup-content.pit h2 {
+  color: #fff;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.4),
+               0 0 20px rgba(127, 140, 141, 0.6);
+}
+
+/* Popup Content Common Styles */
 .popup-content {
-  background: linear-gradient(135deg, #2c3e50, #3498db);
-  padding: 30px;
-  border-radius: 20px;
-  box-shadow: 0 0 30px rgba(0, 0, 0, 0.3),
-              inset 0 0 15px rgba(255, 255, 255, 0.1);
-  max-width: 500px;
+  max-width: 600px;
   width: 90%;
   text-align: center;
   transform: scale(0.9);
-  animation: scaleIn 0.3s ease-out forwards;
-  border: 2px solid rgba(255, 255, 255, 0.1);
+  animation: scaleIn 0.4s cubic-bezier(0.165, 0.84, 0.44, 1) forwards;
+  position: relative;
+  overflow: hidden;
 }
 
-.popup-header {
-  margin-bottom: 25px;
+.popup-content::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 60%);
+  animation: shimmer 3s infinite;
 }
 
-.popup-header h2 {
-  color: #fff;
-  font-size: 28px;
-  margin: 0;
-  padding: 0;
-  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.3);
-  font-weight: bold;
-  letter-spacing: 1px;
+/* Restart Button Styles */
+.popup-restart.gold {
+  background: linear-gradient(45deg, #FFD700, #FFA500);
+  box-shadow: 0 6px 20px rgba(255, 215, 0, 0.4);
 }
 
-.popup-actions {
-  margin-top: 25px;
+.popup-restart.wumpus {
+  background: linear-gradient(45deg, #8B0000, #FF0000);
+  box-shadow: 0 6px 20px rgba(139, 0, 0, 0.4);
+}
+
+.popup-restart.pit {
+  background: linear-gradient(45deg, #2C3E50, #34495E);
+  box-shadow: 0 6px 20px rgba(44, 62, 80, 0.4);
 }
 
 .popup-restart {
-  background: linear-gradient(45deg, #e74c3c, #c0392b);
   color: white;
-  padding: 12px 30px;
+  padding: 15px 40px;
   border: none;
   border-radius: 50px;
-  font-size: 18px;
+  font-size: 20px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
   text-transform: uppercase;
-  letter-spacing: 1px;
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  letter-spacing: 2px;
   font-weight: bold;
+  position: relative;
+  overflow: hidden;
 }
 
 .popup-restart:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-  background: linear-gradient(45deg, #c0392b, #e74c3c);
+  transform: translateY(-3px) scale(1.05);
 }
 
-.popup-restart:active {
-  transform: translateY(1px);
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@keyframes scaleIn {
-  from {
-    transform: scale(0.8);
-    opacity: 0;
-  }
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-/* Rest of your existing styles */
+/* ...existing code... */
 
 /* Responsive adjustments */
 @media (max-width: 1024px) {
