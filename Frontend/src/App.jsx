@@ -99,7 +99,8 @@ function App() {
       visited: false,
       wumpusKilled: false,
       hasGold: false,
-      explored: false
+      explored: false,
+      glitterProbability: 0 // Track probability of gold being near
     })))
   );
 
@@ -113,7 +114,10 @@ function App() {
     searchingForGold: true,
     returningHome: false,
     visitedPositions: [], // Track recent positions for loop detection
-    stuckCounter: 0 // Count how many times AI couldn't find new moves
+    stuckCounter: 0, // Count how many times AI couldn't find new moves
+    explorationMode: 'normal', // normal, aggressive, desperate
+    lastGoldHint: null, // Store last position where we detected a gold hint
+    globalExploredCount: 0 // Track total explored cells
   });
 
   // Initialize grid with game elements
@@ -387,6 +391,12 @@ function App() {
     newKnowledge[y][x].safe = true;
     newKnowledge[y][x].explored = true;
     
+    // Track global exploration progress
+    setAiState(prev => ({
+      ...prev,
+      globalExploredCount: prev.globalExploredCount + 1
+    }));
+    
     // First Order Logic Rules Implementation
     
     // Rule 1: If no breeze, then no pits in adjacent cells
@@ -430,6 +440,38 @@ function App() {
     // Rule 5: If glitter, gold is here
     if (percepts.glitter) {
       newKnowledge[y][x].hasGold = true;
+      // Store this position as a gold hint for future reference
+      setAiState(prev => ({
+        ...prev, 
+        lastGoldHint: { x, y },
+        explorationMode: 'normal' // Reset exploration mode on gold hint
+      }));
+    }
+    
+    // Optimize gold search by tracking glitter probabilities
+    // If we find a glitter, increase probability in surrounding cells
+    if (percepts.glitter) {
+      getAdjacentCells(x, y).forEach(([adjX, adjY]) => {
+        newKnowledge[adjY][adjX].glitterProbability = 1.0; // Maximum probability
+      });
+    } else {
+      // Decrease probability slightly for this cell
+      newKnowledge[y][x].glitterProbability = Math.max(0, (newKnowledge[y][x].glitterProbability || 0) - 0.1);
+      
+      // If cells have been explored but no gold, update exploration mode
+      const visitedCellCount = newKnowledge.flat().filter(cell => cell.visited).length;
+      if (visitedCellCount > 15 && !percepts.glitter) {
+        setAiState(prev => ({
+          ...prev,
+          explorationMode: 'aggressive'
+        }));
+      }
+      if (visitedCellCount > 30 && !percepts.glitter) {
+        setAiState(prev => ({
+          ...prev,
+          explorationMode: 'desperate'
+        }));
+      }
     }
     
     // Apply logical inference to reduce uncertainty
@@ -438,47 +480,149 @@ function App() {
     setAiKnowledge(newKnowledge);
   }
 
-  // Enhanced exploration target finding - NO CHEATING! AI doesn't know gold location
+  // Optimized exploration target finding focused on gold discovery
   function findBestExplorationTarget(knowledge, currentPos) {
     const safeCells = [];
     const unknownCells = [];
+    const visitedCells = []; // Track visited cells for fallback
+    const explorationMode = aiState.explorationMode || 'normal';
+    
+    // Get recent positions to avoid revisiting them
+    const recentPositions = new Set(aiState.visitedPositions.slice(-15));
+    const repetitionFactor = aiState.repetitionFactor || 0;
     
     for (let y = 0; y < 10; y++) {
       for (let x = 0; x < 10; x++) {
-        if (!knowledge[y][x].visited) {
-          const distance = heuristic(currentPos, { x, y });
-          const cellInfo = { x, y, distance };
+        const posKey = `${x},${y}`;
+        const wasRecentlyVisited = recentPositions.has(posKey);
+        const distance = heuristic(currentPos, { x, y });
+        
+        // Skip current position
+        if (x === currentPos.x && y === currentPos.y) continue;
+        
+        // Calculate important values for this cell
+        const glitterProb = knowledge[y][x].glitterProbability || 0;
+        const frontierValue = getFrontierValue(x, y, knowledge);
+        const isDeadEnd = frontierValue === 0 && knowledge[y][x].visited;
+        
+        // Penalty for recently visited positions to break loops
+        const recentVisitPenalty = wasRecentlyVisited ? 
+          (explorationMode === 'desperate' ? 5 : 10) : 0;
+        
+        // Base exploration score calculation
+        let explorationScore = 
+          (10 * glitterProb) + // Gold probability is highest priority
+          (5 * frontierValue) - // Frontier cells are valuable
+          (distance * 0.5) -   // Closer cells are better but less important
+          recentVisitPenalty;  // Avoid recently visited cells
           
-          if (knowledge[y][x].safe) {
-            // Definitely safe cells are best
-            safeCells.push(cellInfo);
-          } else if (!knowledge[y][x].possiblePit && !knowledge[y][x].possibleWumpus) {
-            // Unknown cells that aren't marked as dangerous
-            unknownCells.push({ ...cellInfo, distance: distance + 1 }); // Small penalty for unknown
-          }
+        // Add novelty bonus based on repetition factor - favor new areas
+        if (!knowledge[y][x].visited && repetitionFactor > 0.3) {
+          explorationScore += 3; // Significant bonus to unexplored cells when in a loop
+        }
+        
+        // Apply mode-specific modifiers
+        if (explorationMode === 'aggressive') {
+          // Aggressive mode: Prioritize unexplored territory even more
+          if (!knowledge[y][x].visited) explorationScore += 2;
+        } else if (explorationMode === 'desperate') {
+          // Desperate mode: Take more risks, especially with distant cells
+          if (!knowledge[y][x].visited) explorationScore += 4;
+          if (distance > 3) explorationScore += 1; // Boost distant cells
+        }
+            
+        const cellInfo = { 
+          x, y, 
+          distance,
+          glitterProb,
+          frontierValue,
+          explorationScore,
+          wasRecentlyVisited,
+          isDeadEnd
+        };
+        
+        if (knowledge[y][x].safe && !knowledge[y][x].visited) {
+          // Unvisited safe cells are ideal
+          safeCells.push(cellInfo);
+        } else if (!knowledge[y][x].possiblePit && !knowledge[y][x].possibleWumpus && !knowledge[y][x].visited) {
+          // Unvisited cells that aren't marked dangerous
+          unknownCells.push(cellInfo);
+        } else if (knowledge[y][x].safe && knowledge[y][x].visited && !isDeadEnd) {
+          // Track visited safe cells as fallback
+          visitedCells.push(cellInfo);
         }
       }
     }
     
-    // Prioritize safe cells, then unknown cells
-    const allTargets = [...safeCells, ...unknownCells];
+    console.log(`Exploration mode: ${explorationMode}, Repetition factor: ${repetitionFactor.toFixed(2)}`);
     
-    // Sort by distance but add some randomness for more natural exploration
-    allTargets.sort((a, b) => {
-      const distDiff = a.distance - b.distance;
-      // If distances are close, add some randomness
-      if (Math.abs(distDiff) <= 2) {
-        return Math.random() - 0.5;
+    // Build target list based on exploration mode
+    let allTargets = [];
+    
+    if (safeCells.length > 0) {
+      // We have unvisited safe cells - prioritize these
+      allTargets = [...safeCells];
+    } else if (explorationMode === 'desperate') {
+      // Desperate mode: Consider all options
+      allTargets = [...unknownCells, ...visitedCells];
+      console.log("Desperate exploration: considering all cell types");
+    } else if (explorationMode === 'aggressive') {
+      // Aggressive mode: Consider unknown cells and some visited
+      allTargets = [...unknownCells];
+      
+      // Add visited cells but only if they're not recently visited
+      const nonRecentVisited = visitedCells.filter(cell => !cell.wasRecentlyVisited);
+      allTargets = [...allTargets, ...nonRecentVisited];
+      
+      console.log("Aggressive exploration: considering unknown cells and some visited");
+    } else {
+      // Normal mode: Just safe unvisited cells, fall back to visited if needed
+      allTargets = safeCells.length > 0 ? [...safeCells] : 
+                   [...unknownCells, ...visitedCells.filter(c => !c.wasRecentlyVisited)];
+    }
+    
+    if (allTargets.length === 0) {
+      console.log("No suitable exploration targets - will need to backtrack");
+      return null;
+    }
+    
+    // Sort by exploration score (higher is better)
+    allTargets.sort((a, b) => b.explorationScore - a.explorationScore);
+    
+    // Check if we have a gold hint and prioritize exploring near it
+    if (aiState.lastGoldHint && explorationMode !== 'desperate') {
+      const goldHintX = aiState.lastGoldHint.x;
+      const goldHintY = aiState.lastGoldHint.y;
+      
+      // Find unexplored cells near the gold hint
+      const nearGoldTargets = allTargets.filter(cell => {
+        const goldDistance = Math.abs(cell.x - goldHintX) + Math.abs(cell.y - goldHintY);
+        return goldDistance <= 3; // Within 3 cells of gold hint
+      });
+      
+      if (nearGoldTargets.length > 0) {
+        console.log(`Prioritizing exploration near gold hint at (${goldHintX}, ${goldHintY})`);
+        return nearGoldTargets[0];
       }
-      return distDiff;
-    });
+    }
     
-    console.log(`Found ${safeCells.length} safe cells, ${unknownCells.length} unknown cells for exploration`);
+    console.log(`Found ${safeCells.length} safe unvisited, ${unknownCells.length} unknown cells for exploration`);
+    console.log(`Top target: (${allTargets[0].x}, ${allTargets[0].y}) with score ${allTargets[0].explorationScore.toFixed(2)}`);
     
-    return allTargets.length > 0 ? { x: allTargets[0].x, y: allTargets[0].y } : null;
+    return { x: allTargets[0].x, y: allTargets[0].y };
+  }
+  
+  // Helper function to calculate frontier value (unexplored neighbors)
+  function getFrontierValue(x, y, knowledge) {
+    const adjacentCells = getAdjacentCells(x, y);
+    const unexploredCount = adjacentCells.filter(([adjX, adjY]) => {
+      return !knowledge[adjY][adjX].visited;
+    }).length;
+    
+    return unexploredCount / adjacentCells.length; // 0 to 1 value
   }
 
-  // Balanced AI Step with proper exploration behavior and loop detection
+  // Optimized AI Step for faster gold discovery
   function aiStep() {
     try {
       if (!gameState.isAlive || simulationState === 'stopped') return;
@@ -495,13 +639,21 @@ function App() {
       updateAIKnowledge({ x, y }, percepts);
       updateAIPositionTracking({ x, y });
       
-      console.log(`AI at position (${x}, ${y}), percepts:`, percepts);
-      console.log(`AI state:`, aiState);
+      // Minimal logging for better performance
+      if (percepts.glitter || percepts.stench) {
+        console.log(`AI at position (${x}, ${y}), found: ${percepts.glitter ? 'gold ' : ''}${percepts.stench ? 'stench ' : ''}${percepts.breeze ? 'breeze' : ''}`);
+      }
       
-      // Check for loop detection
+      // Simple loop detection
       const inLoop = detectLoop({ x, y });
       if (inLoop) {
-        console.log("Loop detected! AI will be more aggressive in exploration.");
+        console.log("Loop detected! Changing exploration strategy.");
+        // Switch exploration mode on loops
+        setAiState(prev => ({
+          ...prev,
+          explorationMode: prev.explorationMode === 'normal' ? 'aggressive' : 
+                          prev.explorationMode === 'aggressive' ? 'desperate' : 'normal'
+        }));
       }
       
       // Decision making logic - BALANCED AI BEHAVIOR
@@ -641,135 +793,205 @@ function App() {
     }
   }
 
-  // STRICT loop detection to prevent endless wandering
+  // Advanced loop detection with intelligent pattern recognition
   function detectLoop(currentPos) {
     const posKey = `${currentPos.x},${currentPos.y}`;
-    const recentPositions = aiState.visitedPositions.slice(-20); // Check last 20 positions
+    const recentPositions = aiState.visitedPositions.slice(-30); // Analyze more history
     
-    // Count how many times we've been to this position recently
+    // Skip if we don't have enough history yet
+    if (recentPositions.length < 6) return false;
+    
+    // Level 1: Exact position repeated multiple times (most obvious loop)
     const visitCount = recentPositions.filter(pos => pos === posKey).length;
+    if (visitCount >= 2) {
+      const severity = visitCount >= 4 ? "critical" : 
+                      visitCount >= 3 ? "high" : "medium";
+                      
+      console.log(`Loop detected: Position ${posKey} visited ${visitCount} times recently (${severity})`);
+      return {
+        severity, 
+        type: "position_repeat",
+        count: visitCount,
+        position: posKey
+      };
+    }
     
-    // STRICT: Even 2 visits is considered a loop
-    if (visitCount >= 2) return true;
-    
-    // ULTRA-STRICT Pattern detection: Check for repeating sequences of different lengths
-    const patterns = [2, 3, 4, 5, 6]; // Check for patterns of length 2-6
-    
-    for (const patternLength of patterns) {
-      // ULTRA-STRICT: Different requirements based on pattern length
-      if (patternLength <= 3) {
-        // For short patterns (2-3), require at least 4 repetitions
-        if (recentPositions.length >= patternLength * 4) {
-          const patterns = [];
-          for (let i = 0; i < 4; i++) {
-            const startIdx = -patternLength * (i + 1);
-            const endIdx = i === 0 ? undefined : -patternLength * i;
-            patterns.push(recentPositions.slice(startIdx, endIdx));
-          }
-          
-          // Check if all 4 patterns are identical
-          const firstPattern = patterns[0];
-          const allPatternsMatch = patterns.every(pattern => 
-            JSON.stringify(pattern) === JSON.stringify(firstPattern)
-          );
-          
-          if (allPatternsMatch) {
-            // Additional validation: pattern must contain actual movement
-            const patternUniquePositions = [...new Set(firstPattern)];
-            if (patternUniquePositions.length >= 2) {
-              console.log(`ULTRA-STRICT Loop detected: Short pattern of length ${patternLength} repeating 4+ times with ${patternUniquePositions.length} unique positions`);
-              return true;
-            }
-          }
-        }
+    // Level 2: Oscillation detection (going back and forth)
+    if (recentPositions.length >= 8) {
+      // Check oscillation patterns of different sizes
+      for (let size = 2; size <= 4; size++) {
+        const recentSet = new Set(recentPositions.slice(-size * 2));
         
-        // Also check for 3 repetitions with stricter validation for length 2-3
-        if (recentPositions.length >= patternLength * 3) {
+        // If we're oscillating between a small number of positions
+        if (recentSet.size <= size && recentPositions.length >= size * 2) {
+          const severity = size === 2 ? "critical" : 
+                          size === 3 ? "high" : "medium";
+                          
+          console.log(`Loop detected: ${size}-position oscillation (${severity})`);
+          return {
+            severity,
+            type: "oscillation",
+            cells: recentSet.size,
+            positions: [...recentSet]
+          };
+        }
+      }
+    }
+    
+    // Level 3: Path repetition detection (extended pattern analysis)
+    if (recentPositions.length >= 10) {
+      // Check for repeating path sequences of various lengths
+      for (let patternLength = 2; patternLength <= 6; patternLength++) {
+        if (recentPositions.length >= patternLength * 2) {
           const lastPattern = recentPositions.slice(-patternLength);
-          const previousPattern = recentPositions.slice(-patternLength * 2, -patternLength);
-          const thirdLastPattern = recentPositions.slice(-patternLength * 3, -patternLength * 2);
+          const prevPattern = recentPositions.slice(-patternLength*2, -patternLength);
           
-          if (JSON.stringify(lastPattern) === JSON.stringify(previousPattern) &&
-              JSON.stringify(previousPattern) === JSON.stringify(thirdLastPattern)) {
-            
-            // STRICT validation for short patterns: must have multiple positions AND recent frequency
-            const patternUniquePositions = [...new Set(lastPattern)];
-            const patternFrequency = recentPositions.filter(pos => lastPattern.includes(pos)).length;
-            
-            if (patternUniquePositions.length >= 2 && patternFrequency >= patternLength * 3) {
-              console.log(`ULTRA-STRICT Loop detected: Short pattern of length ${patternLength} with high frequency (${patternFrequency}) and ${patternUniquePositions.length} unique positions`);
-              return true;
-            }
+          // Check if patterns match
+          if (JSON.stringify(lastPattern) === JSON.stringify(prevPattern)) {
+            const severity = patternLength <= 3 ? "high" : "medium";
+            console.log(`Loop detected: Path pattern of length ${patternLength} is repeating (${severity})`);
+            return {
+              severity,
+              type: "pattern_repeat",
+              length: patternLength,
+              pattern: lastPattern
+            };
           }
         }
-      } else {
-        // For longer patterns (4-6), require at least 3 repetitions (original logic)
-        if (recentPositions.length >= patternLength * 3) {
+      }
+      
+      // Look for longer patterns with small variations
+      if (recentPositions.length >= 15) {
+        for (let patternLength = 3; patternLength <= 6; patternLength++) {
+          // Allow for one position difference in the pattern (fuzzy matching)
           const lastPattern = recentPositions.slice(-patternLength);
-          const previousPattern = recentPositions.slice(-patternLength * 2, -patternLength);
-          const thirdLastPattern = recentPositions.slice(-patternLength * 3, -patternLength * 2);
+          const prevPattern = recentPositions.slice(-patternLength*2, -patternLength);
           
-          // Check if the pattern repeats at least 3 times consecutively
-          if (JSON.stringify(lastPattern) === JSON.stringify(previousPattern) &&
-              JSON.stringify(previousPattern) === JSON.stringify(thirdLastPattern)) {
-            console.log(`STRICT Loop detected: Long pattern of length ${patternLength} repeating 3+ times`);
-            return true;
+          let differences = 0;
+          for (let i = 0; i < patternLength; i++) {
+            if (lastPattern[i] !== prevPattern[i]) differences++;
           }
           
-          // Additional check: Pattern must also be non-trivial (not just staying in one place)
-          const patternUniquePositions = [...new Set(lastPattern)];
-          if (patternUniquePositions.length >= 2 && 
-              JSON.stringify(lastPattern) === JSON.stringify(previousPattern)) {
-            // Allow 2-time repetition only for complex patterns (length >= 4) with multiple positions
-            if (patternLength >= 4) {
-              console.log(`STRICT Loop detected: Complex long pattern of length ${patternLength} with ${patternUniquePositions.length} unique positions`);
-              return true;
-            }
+          // If patterns match with at most one difference
+          if (differences <= 1) {
+            console.log(`Loop detected: Fuzzy path pattern of length ${patternLength} is repeating`);
+            return {
+              severity: "medium",
+              type: "fuzzy_pattern_repeat",
+              length: patternLength
+            };
           }
         }
       }
     }
     
-    // Oscillation detection: Check if bouncing between multiple positions
-    const uniquePositions = [...new Set(recentPositions.slice(-8))];
-    if (uniquePositions.length <= 3 && recentPositions.length >= 8) {
-      console.log("Loop detected: Oscillating between limited positions");
-      return true;
+    // Level 4: Limited area detection with spatial analysis
+    if (recentPositions.length >= 12) {
+      const uniquePositions = [...new Set(recentPositions.slice(-12))];
+      // If we've only visited a few unique positions in the last 12 moves
+      const uniqueRatio = uniquePositions.length / 12;
+      
+      if (uniqueRatio <= 0.33) { // Only 33% or fewer unique cells
+        const severity = uniqueRatio <= 0.25 ? "high" : "medium";
+        console.log(`Loop detected: Stuck in small area with only ${uniquePositions.length} unique positions (${severity})`);
+        return {
+          severity,
+          type: "confined_area",
+          uniqueCells: uniquePositions.length,
+          uniqueRatio
+        };
+      }
     }
     
-    // Stuck in area detection: Check if AI is confined to a small area
-    if (recentPositions.length >= 12) {
-      const recentUniquePositions = [...new Set(recentPositions.slice(-12))];
-      if (recentUniquePositions.length <= 4) {
-        console.log("Loop detected: Stuck in small area");
-        return true;
+    // Level 5: Progressive confinement detection
+    // Check if we're exploring fewer and fewer unique cells over time
+    if (recentPositions.length >= 20) {
+      const firstHalfUnique = new Set(recentPositions.slice(-20, -10)).size;
+      const secondHalfUnique = new Set(recentPositions.slice(-10)).size;
+      
+      // If we're exploring fewer unique cells in the second half
+      if (secondHalfUnique < firstHalfUnique * 0.7) {
+        console.log(`Loop detected: Decreasing exploration efficiency (${secondHalfUnique} vs ${firstHalfUnique} unique cells)`);
+        return {
+          severity: "medium",
+          type: "decreasing_efficiency",
+          firstHalfUnique,
+          secondHalfUnique
+        };
+      }
+    }
+    
+    // Level 6: Global efficiency analysis
+    if (recentPositions.length >= 25) {
+      const uniquePositions = [...new Set(recentPositions)];
+      const globalEfficiency = uniquePositions.length / recentPositions.length;
+      
+      // If we've been moving a lot but not visiting many unique cells
+      if (globalEfficiency <= 0.4) { // Less than 40% unique cells overall
+        const severity = globalEfficiency <= 0.25 ? "high" : "medium";
+        console.log(`Loop detected: Low exploration efficiency (${uniquePositions.length} unique out of ${recentPositions.length} moves, ${(globalEfficiency * 100).toFixed(1)}%)`);
+        return {
+          severity,
+          type: "inefficient_exploration",
+          efficiency: globalEfficiency,
+          uniqueCount: uniquePositions.length,
+          totalMoves: recentPositions.length
+        };
       }
     }
     
     return false;
   }
 
-  // STRICT AI position tracking with enhanced pattern recognition
+  // Enhanced position tracking with anti-stuck measures
   function updateAIPositionTracking(position) {
     const posKey = `${position.x},${position.y}`;
     setAiState(prev => {
-      const newVisitedPositions = [...prev.visitedPositions.slice(-30), posKey]; // Keep last 30 positions for better analysis
+      // Keep more history for better loop detection (30 positions)
+      const newVisitedPositions = [...prev.visitedPositions.slice(-29), posKey];
       
-      // More aggressive loop breaking detection
-      const recentPositions = newVisitedPositions.slice(-8);
-      const uniqueRecentPositions = [...new Set(recentPositions)];
+      // Track position frequency for more advanced loop breaking
+      const posFrequency = {};
+      newVisitedPositions.forEach(pos => {
+        posFrequency[pos] = (posFrequency[pos] || 0) + 1;
+      });
       
-      // Check if this move is actually breaking a loop pattern
-      const isBreakingLoop = uniqueRecentPositions.length > 3 && // Moving between more than 3 positions
-        !prev.visitedPositions.slice(-6).includes(posKey); // Not in last 6 positions
+      // Calculate repetition factor - how much we're repeating positions
+      const totalPositions = newVisitedPositions.length;
+      const uniquePositions = Object.keys(posFrequency).length;
+      const repetitionFactor = totalPositions > 0 ? 1 - (uniquePositions / totalPositions) : 0;
       
-      // Progressive stuck counter reduction for good moves
-      const stuckReduction = isBreakingLoop ? Math.max(2, Math.floor(prev.stuckCounter * 0.5)) : 1;
+      // Automatically escalate exploration mode based on repetition
+      let newExplorationMode = prev.explorationMode;
+      if (repetitionFactor > 0.6) { // High repetition (60%+)
+        newExplorationMode = 'desperate';
+        console.log(`High repetition detected (${Math.round(repetitionFactor * 100)}%) - switching to desperate mode`);
+      } else if (repetitionFactor > 0.4) { // Medium repetition (40-60%)
+        newExplorationMode = 'aggressive';
+        console.log(`Medium repetition detected (${Math.round(repetitionFactor * 100)}%) - switching to aggressive mode`);
+      } else if (prev.globalExploredCount > 50) {
+        // Also consider global exploration count
+        newExplorationMode = 'aggressive';
+      }
+      
+      // Check if this is a brand new position
+      const isNewPosition = !prev.visitedPositions.includes(posKey);
+      
+      // Reset stuck counter when we find a new cell, increment it otherwise
+      const newStuckCounter = isNewPosition ? 0 : Math.min(prev.stuckCounter + 1, 20);
+      
+      // If stuck for too long, force a mode change
+      if (newStuckCounter >= 10 && prev.explorationMode !== 'desperate') {
+        console.log("Stuck for too long - forcing desperate exploration mode");
+        newExplorationMode = 'desperate';
+      }
       
       return {
         ...prev,
         visitedPositions: newVisitedPositions,
-        stuckCounter: isBreakingLoop ? Math.max(0, prev.stuckCounter - stuckReduction) : prev.stuckCounter
+        stuckCounter: newStuckCounter,
+        explorationMode: newExplorationMode,
+        repetitionFactor // Store this for other decisions
       };
     });
   }
@@ -801,6 +1023,95 @@ function App() {
       ...prev,
       stuckCounter: 0
     }));
+  }
+
+  // Helper functions for stuck detection
+  function countVisits(x, y) {
+    const posKey = `${x},${y}`;
+    return aiState.visitedPositions.filter(pos => pos === posKey).length;
+  }
+  
+  function isRecentlyVisited(x, y) {
+    const posKey = `${x},${y}`;
+    const recentPositions = aiState.visitedPositions.slice(-10);
+    return recentPositions.includes(posKey);
+  }
+  
+  // Find a strategic backtracking target
+  function findStrategicBacktrackTarget(x, y) {
+    console.log("Finding strategic backtrack target");
+    
+    // Check if we have any known safe cells far from current position
+    const distantSafeCells = [];
+    
+    for (let cy = 0; cy < 10; cy++) {
+      for (let cx = 0; cx < 10; cx++) {
+        const cell = aiKnowledge[cy][cx];
+        if (cell.safe && !cell.definitelyDangerous) {
+          const distance = heuristic({x, y}, {x: cx, y: cy});
+          const visitCount = countVisits(cx, cy);
+          const recentlyVisited = isRecentlyVisited(cx, cy);
+          
+          // Find cells that are distant but not very recently visited
+          if (distance >= 3 && (!recentlyVisited || aiState.explorationMode === 'desperate')) {
+            distantSafeCells.push({
+              x: cx, y: cy, 
+              distance,
+              visitCount,
+              // Score - prefer distant cells with fewer visits
+              score: distance * 2 - visitCount * 3
+            });
+          }
+        }
+      }
+    }
+    
+    // Sort by score (higher is better)
+    distantSafeCells.sort((a, b) => b.score - a.score);
+    
+    if (distantSafeCells.length > 0) {
+      console.log(`Found strategic backtrack target at (${distantSafeCells[0].x}, ${distantSafeCells[0].y}) with score ${distantSafeCells[0].score}`);
+      return { x: distantSafeCells[0].x, y: distantSafeCells[0].y };
+    }
+    
+    // Fallback - if no good target found
+    return null;
+  }
+  
+  // Find an emergency move to a visited cell (last resort)
+  function findEmergencyVisitedCell(x, y) {
+    console.log("Looking for emergency visited cell");
+    
+    const adjacentCells = getAdjacentCells(x, y);
+    const visitableCells = adjacentCells
+      .map(([adjX, adjY]) => {
+        // Skip positions that definitely have dangers
+        if (aiKnowledge[adjY][adjX].definitelyDangerous) return null;
+        
+        // Get visit data
+        const posKey = `${adjX},${adjY}`;
+        const recentPositions = aiState.visitedPositions.slice(-8);
+        const visitCount = aiState.visitedPositions.filter(pos => pos === posKey).length;
+        const recentlyVisited = recentPositions.includes(posKey);
+        
+        return {
+          x: adjX,
+          y: adjY,
+          visitCount,
+          recentlyVisited,
+          // Score - lower is better
+          score: visitCount * 2 + (recentlyVisited ? 5 : 0)
+        };
+      })
+      .filter(cell => cell !== null)
+      .sort((a, b) => a.score - b.score); // Sort by score (lower is better)
+    
+    if (visitableCells.length > 0) {
+      console.log(`Found emergency visited cell at (${visitableCells[0].x}, ${visitableCells[0].y})`);
+      return { x: visitableCells[0].x, y: visitableCells[0].y };
+    }
+    
+    return null;
   }
 
   // Helper function to assess current danger level
@@ -956,8 +1267,59 @@ function App() {
     return null;
   }
 
-  // Helper function to handle stuck situations
+  // Enhanced function to handle stuck situations with recovery attempts
   function handleStuckSituation(x, y) {
+    console.log("AI is potentially stuck at position:", x, y);
+    
+    // First try - attempt to make a risky move as a last resort
+    if (aiState.stuckCounter < 15) {
+      console.log("Attempting emergency recovery with risky move");
+      
+      // Force a change to desperate mode
+      setAiState(prev => ({
+        ...prev,
+        explorationMode: 'desperate',
+        stuckCounter: prev.stuckCounter + 1,
+        emergencyModeActive: true
+      }));
+      
+      // Try to find ANY adjacent cell - even slightly risky ones
+      const adjacentCells = getAdjacentCells(x, y);
+      let riskyMoves = [];
+      
+      adjacentCells.forEach(([adjX, adjY]) => {
+        // Avoid cells with high danger probability
+        const cell = aiKnowledge[adjY][adjX];
+        const danger = (cell.pitProbability || 0) + (cell.wumpusProbability || 0);
+        
+        if (danger < 0.7 && !cell.definitelyDangerous) {  // Accept some risk but not certain death
+          const visitCount = countVisits(adjX, adjY);
+          const recentVisit = isRecentlyVisited(adjX, adjY);
+          
+          riskyMoves.push({
+            x: adjX, 
+            y: adjY, 
+            danger,
+            visitCount,
+            recentVisit,
+            score: danger * 10 + visitCount * 2 + (recentVisit ? 5 : 0)  // Lower score is better
+          });
+        }
+      });
+      
+      // Sort by score (lower is better)
+      riskyMoves.sort((a, b) => a.score - b.score);
+      
+      if (riskyMoves.length > 0) {
+        const bestRiskyMove = riskyMoves[0];
+        console.log(`Making EMERGENCY RISKY MOVE to (${bestRiskyMove.x}, ${bestRiskyMove.y}) with danger ${bestRiskyMove.danger.toFixed(2)}`);
+        const direction = getDirection({ x, y }, bestRiskyMove);
+        handleMove(direction);
+        return;
+      }
+    }
+    
+    // If still stuck or too many risky attempts, pause simulation
     console.log("AI is truly stuck, pausing simulation");
     setSimulationState('paused');
     setPopupContent({
@@ -966,6 +1328,13 @@ function App() {
           <div className="text-red-600 text-2xl font-bold mb-2">AI is stuck!</div>
           <div className="text-gray-500 text-lg">Position: ({x}, {y})</div>
           <div className="text-gray-500 text-lg">No safe moves available. Consider restarting.</div>
+          <div className="text-gray-700 mt-2">
+            Stuck counter: {aiState.stuckCounter}
+            <br/>
+            Exploration mode: {aiState.explorationMode}
+            <br/>
+            Repetition factor: {(aiState.repetitionFactor || 0).toFixed(2)}
+          </div>
         </div>
       ),
       sound: null
@@ -1007,7 +1376,7 @@ function App() {
     return safeCells;
   }
 
-  // Enhanced useEffect for AI stepping with error handling
+  // Enhanced useEffect for AI stepping with optimized performance
   useEffect(() => {
     if (gameMode === 'ai' && (simulationState === 'running' || simulationState === 'step')) {
       try {
@@ -1023,18 +1392,10 @@ function App() {
           return;
         }
         
-        // Additional safety checks for AI state properties
-        if (typeof aiState.searchingForGold === 'undefined' || 
-            typeof aiState.returningHome === 'undefined' ||
-            !aiState.visitedPositions ||
-            typeof aiState.stuckCounter === 'undefined') {
-          console.error('AI state missing required properties:', aiState);
+        // Minimal safety checks for critical properties
+        if (!aiState.visitedPositions) {
+          console.error('AI state missing visitedPositions property');
           setSimulationState('paused');
-          showGamePopup(
-            `⚠️ AI State Error!\nAI state missing required properties.\nPlease reload the environment.`,
-            null,
-            'wumpus'
-          );
           return;
         }
         
@@ -1047,13 +1408,8 @@ function App() {
             } catch (error) {
               console.error('Error in AI step execution:', error);
               setSimulationState('paused');
-              showGamePopup(
-                `⚠️ AI Step Error!\nError during step execution: ${error.message}`,
-                null,
-                'wumpus'
-              );
             }
-          }, 100);
+          }, 10);
         } else if (simulationState === 'running') {
           // Continuous execution
           const interval = setInterval(() => {
@@ -1069,7 +1425,7 @@ function App() {
               );
               clearInterval(interval);
             }
-          }, 800); // 800ms per step for better visualization
+          }, 300); // 300ms per step for faster exploration
           return () => clearInterval(interval);
         }
       } catch (error) {
