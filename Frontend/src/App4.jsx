@@ -123,7 +123,6 @@ function App() {
     returningHome: false,
     visitedPositions: [], // Track recent positions for loop detection
     stuckCounter: 0, // Count how many times AI couldn't find new moves
-    gameWon: false, // Flag to track if the game has been won
     explorationMode: 'normal', // normal, aggressive, desperate
     lastGoldHint: null, // Store last position where we detected a gold hint
     globalExploredCount: 0, // Track total explored cells
@@ -239,77 +238,11 @@ function App() {
   function heuristic(a, b) {
     return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); //sum of the absolute differences of their x and y coordinates.
   }
-  
-  // Emergency pathfinding function - used as an absolute last resort
-  function emergencyPathfinding(start, goal, knowledge) {
-    console.log(`EMERGENCY: Attempting desperate pathfinding from (${start.x},${start.y}) to (${goal.x},${goal.y})`);
-    
-    // Use a simple breadth-first search with very limited safety checking
-    const queue = [{ pos: start, path: [start] }];
-    const visited = Array(10).fill().map(() => Array(10).fill(false));
-    visited[start.y][start.x] = true;
-    
-    let iterations = 0;
-    const maxIterations = 1000; // Prevent infinite loops
-    
-    while (queue.length > 0 && iterations < maxIterations) {
-      iterations++;
-      const current = queue.shift();
-      const { x, y } = current.pos;
-      
-      if (x === goal.x && y === goal.y) {
-        console.log(`EMERGENCY: Found desperate path of length ${current.path.length}`);
-        return current.path;
-      }
-      
-      getAdjacentCells(x, y).forEach(([nx, ny]) => {
-        if (visited[ny][nx]) return;
-        visited[ny][nx] = true;
-        
-        // Only avoid cells that are definitely known to be dangerous
-        if (knowledge[ny][nx].definitelyDangerous) return;
-        
-        // Accept some risk for possible dangers
-        if (knowledge[ny][nx].possiblePit && Math.random() < 0.5) return;
-        if (knowledge[ny][nx].possibleWumpus && Math.random() < 0.7) return;
-        
-        const newPath = [...current.path, { x: nx, y: ny }];
-        queue.push({ pos: { x: nx, y: ny }, path: newPath });
-      });
-    }
-    
-    console.log("EMERGENCY: Failed to find any path even with desperate measures");
-    return null; // No path found even with emergency measures
-  }
 
   // Realistic A* Pathfinding - NO CHEATING! AI only uses known information
   function aStar(start, goal, knowledge, allowRisky = false) {
     const open = [{ pos: start, path: [start], cost: 0 }];
     const closed = Array(10).fill().map(() => Array(10).fill(false));
-    
-    // Check how desperate we are based on current state
-    const explorationMode = aiState.explorationMode || 'normal';
-    const stuckCounter = aiState.stuckCounter || 0;
-    
-    // Check if we're in a critical loop
-    let inCriticalLoop = false;
-    if (start.x === goal.x && start.y === goal.y) {
-      // If we're pathfinding to our own position, we might be trying to break a loop
-      const loopStatus = detectLoop(start);
-      inCriticalLoop = loopStatus && (loopStatus.severity === "critical" || loopStatus.requiresRandomEscape);
-    }
-    
-    // If we're in extreme mode or highly stuck, increase willingness to take risks
-    const extremelyDesperate = explorationMode === 'extreme' || stuckCounter >= 15 || inCriticalLoop;
-    const moderatelyDesperate = explorationMode === 'desperate' || stuckCounter >= 10;
-    
-    // Adjust pathfinding parameters based on desperation level
-    const safetyWeight = extremelyDesperate ? 0.3 : 
-                        moderatelyDesperate ? 0.7 : 1.0;
-                        
-    // In extremely desperate situations, we might need to try risky moves
-    // Track if we find ANY valid paths
-    let foundAnyValidPaths = false;
     
     while (open.length > 0) {
       // Sort by f(n) = g(n) + h(n) with safety priority
@@ -317,13 +250,9 @@ function App() {
         const fA = a.cost + heuristic(a.pos, goal);
         const fB = b.cost + heuristic(b.pos, goal);
         
-        // Add safety penalty for dangerous cells, but weighted by desperation level
-        let safetyPenaltyA = getSafetyPenalty(a.pos, knowledge, allowRisky);
-        let safetyPenaltyB = getSafetyPenalty(b.pos, knowledge, allowRisky);
-        
-        // When desperate, reduce the impact of safety penalties to consider riskier paths
-        safetyPenaltyA *= safetyWeight;
-        safetyPenaltyB *= safetyWeight;
+        // Add safety penalty for dangerous cells
+        const safetyPenaltyA = getSafetyPenalty(a.pos, knowledge, allowRisky);
+        const safetyPenaltyB = getSafetyPenalty(b.pos, knowledge, allowRisky);
         
         return (fA + safetyPenaltyA) - (fB + safetyPenaltyB);
       });
@@ -332,7 +261,6 @@ function App() {
       const { x, y } = current.pos;
       
       if (x === goal.x && y === goal.y) {
-        foundAnyValidPaths = true;
         return current.path;
       }
       
@@ -344,7 +272,7 @@ function App() {
         
         const cell = knowledge[ny][nx];
         
-        // Movement rules with variable risk tolerance
+        // ULTRA-SAFE movement rules - NO RISKS!
         let canMove = false;
         
         if (cell.visited) {
@@ -355,19 +283,6 @@ function App() {
           canMove = true;
         } else if (!cell.possiblePit && !cell.possibleWumpus && !cell.safe && !cell.visited) {
           // Allow movement to completely unknown cells (not marked as any danger)
-          canMove = true;
-        } else if (extremelyDesperate) {
-          // In extremely desperate situations, consider risky moves
-          // But avoid definite danger
-          if (cell.definitelyDangerous) {
-            canMove = false; // Never move into certain death
-          } else if (cell.possiblePit && !cell.possibleWumpus) {
-            // Consider possible pits in desperate situations
-            canMove = Math.random() < 0.4; // 40% chance to try
-          } else if (!cell.possiblePit && cell.possibleWumpus && !aiState.hasShot) {
-            // More careful with possible wumpus if we have no arrow
-            canMove = Math.random() < 0.2; // 20% chance to try
-          }
           canMove = true;
         } else if (allowRisky) {
           // In risky mode, allow visited cells and be more lenient with unknowns
@@ -398,14 +313,6 @@ function App() {
           }
         }
       });
-    }
-    
-    // If we're extremely desperate and found no paths at all, consider emergency measures
-    if (extremelyDesperate && !foundAnyValidPaths) {
-      console.log("EMERGENCY: No valid paths found in A* search, attempting emergency escape");
-      
-      // Try emergency pathfinding with reduced safety constraints
-      return emergencyPathfinding(start, goal, knowledge);
     }
     
     return null; // No path found
@@ -479,9 +386,7 @@ function App() {
         penalty += allowRisky ? 10 : 50; // Reduced penalty if we've proven we can kill a wumpus
       } else if (!gameState.hasArrow) {
         // Without an arrow, wumpus cells should be treated as completely impassable
-        // BUT: allow much lower penalty in desperate mode to break out of severe loops
-        const inDesperateMode = aiState.explorationMode === 'desperate' && aiState.stuckCounter > 15;
-        penalty += inDesperateMode ? 100 : (allowRisky ? 500 : 9999); // Lower penalty in desperate mode
+        penalty += allowRisky ? 500 : 9999; // Extremely high penalty - effectively making it impossible
       } else {
         // Normal penalty if we have an arrow and haven't killed a wumpus yet
         penalty += allowRisky ? 20 : 150;
@@ -515,26 +420,8 @@ function App() {
     }
     
     // ENHANCEMENT 7: Stronger blocking - completely avoid blocked cells
-    // But allow blocked cells in desperate situations after some time
     if (aiState.blockedCells[posKey] && aiState.blockedCells[posKey] > Date.now()) {
-      // Calculate how much longer this cell is blocked for
-      const remainingBlockTime = aiState.blockedCells[posKey] - Date.now();
-      const explorationMode = aiState.explorationMode || 'normal';
-      
-      if (explorationMode === 'extreme') {
-        // In extreme mode, reduce block penalties significantly
-        // The longer the block has been in place, the more we reduce it
-        const blockAge = 60000 - Math.min(remainingBlockTime, 60000);
-        const reductionFactor = blockAge / 60000; // 0 to 1 based on age
-        penalty += 250 * (1 - reductionFactor); // Between 0 and 250
-      } 
-      else if (explorationMode === 'desperate' && remainingBlockTime < 30000) {
-        // In desperate mode, reduce penalties for cells that are close to becoming unblocked
-        penalty += 350; // Still high but not impossible
-      }
-      else {
-        penalty += 500; // Make it virtually impossible to select in normal modes
-      }
+      penalty += 500; // Make it virtually impossible to select
     }
     
     return penalty;
@@ -1046,11 +933,6 @@ function App() {
   // Optimized AI Step for faster gold discovery
   function aiStep() {
     try {
-      // Check if the game is already won to prevent further actions
-      if (aiState.gameWon) {
-        return; // Exit immediately if the game is already won
-      }
-      
       // Clear forced exploration update flag and reset avoidance center after some steps
       if (aiState.forcedExplorationUpdate && aiState.globalExploredCount % 10 === 0) {
         setAiState(prev => ({
@@ -1080,88 +962,11 @@ function App() {
         console.log(`AI at position (${x}, ${y}), found: ${percepts.glitter ? 'gold ' : ''}${percepts.stench ? 'stench ' : ''}`);
       }
       
-      // Enhanced loop detection with more aggressive measures
+      // Simple loop detection
       const inLoop = detectLoop({ x, y });
       if (inLoop) {
         // This is an important event to always log
-        console.log(`Loop detected! Type: ${inLoop.type}, Severity: ${inLoop.severity}`);
-        
-        // Check if we're in a severe loop situation
-        const isSevereLoop = aiState.stuckCounter > 15 || inLoop.severity === "critical";
-        
-        // For critical loops, take immediate emergency action
-        if (inLoop.requiresRandomEscape || inLoop.severity === "critical") {
-          console.log("CRITICAL LOOP DETECTED: Taking emergency action");
-          
-          // Try immediate random escape move
-          if (makeRandomEscapeMove(x, y)) {
-            return; // Skip the rest of this step if we made an emergency move
-          }
-          
-          // If random move failed, do a partial knowledge reset
-          const newKnowledge = [...aiKnowledge];
-          const resetRadius = 2;
-          
-          console.log(`Emergency partial knowledge reset within ${resetRadius} cells`);
-          for (let dy = -resetRadius; dy <= resetRadius; dy++) {
-            for (let dx = -resetRadius; dx <= resetRadius; dx++) {
-              const nx = x + dx;
-              const ny = y + dy;
-              if (nx >= 0 && nx < 10 && ny >= 0 && ny < 10) {
-                // Only reset non-visited cells to preserve valid knowledge
-                if (!newKnowledge[ny][nx].visited) {
-                  // Mark a percentage of cells as safe to encourage exploration
-                  if (Math.random() < 0.6) {
-                    newKnowledge[ny][nx].possiblePit = false;
-                    newKnowledge[ny][nx].possibleWumpus = false;
-                  }
-                }
-              }
-            }
-          }
-          setAiKnowledge(newKnowledge);
-          
-          // Clear all blocked cells to allow revisiting
-          setAiState(prev => ({
-            ...prev,
-            blockedCells: {},
-            stuckCounter: 0, // Reset counter after taking emergency action
-            explorationMode: 'desperate',
-            forcedExplorationUpdate: true
-          }));
-        } 
-        else if (isSevereLoop) {
-          console.log("SEVERE LOOP DETECTED: Temporarily resetting risk assessment for known cells");
-          
-          // Look for cells that were previously marked as risky but might be worth reconsidering
-          // particularly in the area where we're stuck
-          const reconsiderCells = [];
-          
-          // Check nearby cells for possible wumpus cells to reconsider
-          for (let ny = Math.max(0, y - 3); ny < Math.min(10, y + 4); ny++) {
-            for (let nx = Math.max(0, x - 3); nx < Math.min(10, x + 4); nx++) {
-              if (aiKnowledge[ny][nx].possibleWumpus) {
-                reconsiderCells.push({x: nx, y: ny});
-              }
-            }
-          }
-          
-          // If we found cells to reconsider, randomly pick one to reset
-          if (reconsiderCells.length > 0 && Math.random() > 0.5) {
-            const cellToReset = reconsiderCells[Math.floor(Math.random() * reconsiderCells.length)];
-            console.log(`Resetting risk assessment for cell (${cellToReset.x}, ${cellToReset.y}) to break out of loop`);
-            
-            // Create a copy of the knowledge base
-            const newKnowledge = aiKnowledge.map(row => row.map(cell => ({ ...cell })));
-            
-            // Reset this cell's risk assessment
-            newKnowledge[cellToReset.y][cellToReset.x].possibleWumpus = false;
-            
-            // Update the knowledge base
-            setAiKnowledge(newKnowledge);
-          }
-        }
-        
+        console.log("Loop detected! Changing exploration strategy.");
         // Switch exploration mode on loops
         setAiState(prev => ({
           ...prev,
@@ -1203,21 +1008,8 @@ function App() {
       if (gameState.hasGold && x === 0 && y === 9) {
         console.log("AI won the game!");
         
-        // Add a flag to aiState to track that the game is already won
-        // to prevent showing multiple popups
-        if (aiState.gameWon) {
-          console.log("Game already won, skipping victory popup");
-          return;
-        }
-        
         // Immediately stop the simulation to prevent multiple popups
         setSimulationState('stopped');
-        
-        // Mark the game as won in the AI state
-        setAiState(prev => ({
-          ...prev,
-          gameWon: true
-        }));
         
         // Calculate final score manually to ensure it's accurate
         // The score includes: -1 per move, -10 per arrow, +1000 for gold
@@ -1634,21 +1426,6 @@ function App() {
       }
     }
     
-    // Level 6: Extreme persistence detection
-    // If we've been in desperate mode for too long, we need extreme measures
-    const desperateCount = recentPositions.length >= 30 ? 
-      recentPositions.slice(-30).filter(p => p === posKey).length : 0;
-    
-    if (desperateCount >= 5) {
-      console.log(`CRITICAL: Extreme persistence at position ${posKey} - initiating emergency escape`);
-      return {
-        severity: "critical",
-        type: "extreme_persistence",
-        count: desperateCount,
-        requiresRandomEscape: true
-      };
-    }
-    
     // Level 6: Global efficiency analysis
     if (recentPositions.length >= 25) {
       const uniquePositions = [...new Set(recentPositions)];
@@ -1743,61 +1520,14 @@ function App() {
       const updatedBlockedCells = { ...prev.blockedCells };
       const visitCount = updatedVisitCountMap[posKey] || 0;
       
-      // Check if we've detected a loop
-      const loopStatus = detectLoop({x: position.x, y: position.y});
-      const isInLoop = loopStatus !== false;
-      const isCriticalLoop = isInLoop && (loopStatus.severity === "critical" || loopStatus.requiresRandomEscape);
-      
-      // More aggressive blocking based on visit patterns and loop detection
-      if (visitCount >= 3) {
-        // Base blocking duration
-        let blockingDuration = 5000 * Math.pow(2, visitCount - 3);
-        
-        // If we're in a loop, make blocking much more aggressive
-        if (isInLoop) {
-          blockingDuration *= 2;
-          
-          // For critical loops, make blocking extremely aggressive
-          if (isCriticalLoop) {
-            blockingDuration *= 3;
-          }
-          
-          // Block nearby cells too to force the agent to explore elsewhere
-          const blockRadius = isCriticalLoop ? 2 : 1;
-          
-          for (let dy = -blockRadius; dy <= blockRadius; dy++) {
-            for (let dx = -blockRadius; dx <= blockRadius; dx++) {
-              // Skip current position (handled separately)
-              if (dx === 0 && dy === 0) continue;
-              
-              const nx = position.x + dx;
-              const ny = position.y + dy;
-              
-              // Check bounds
-              if (nx >= 0 && nx < 10 && ny >= 0 && ny < 10) {
-                const nearbyPosKey = `${nx},${ny}`;
-                const nearbyVisitCount = updatedVisitCountMap[nearbyPosKey] || 0;
-                
-                // Only block if this cell has been visited before
-                if (nearbyVisitCount > 0) {
-                  // Shorter duration for nearby cells
-                  const nearbyDuration = blockingDuration * 0.5;
-                  updatedBlockedCells[nearbyPosKey] = Date.now() + nearbyDuration;
-                }
-              }
-            }
-          }
-        }
-        
-        // Cap at a maximum blocking time
-        blockingDuration = Math.min(blockingDuration, 120000); // Cap at 2 minutes
-        
-        // Apply the block to current cell
+      // Block cells that have been visited too many times
+      if (visitCount >= 4) {
+        // Exponentially increase blocking time based on visit count
+        const blockingDuration = Math.min(5000 * Math.pow(2, visitCount - 4), 60000); // Cap at 1 minute
         updatedBlockedCells[posKey] = Date.now() + blockingDuration;
-        
-        // Log all blocking in loops, but only significant blocking otherwise
-        if (isInLoop || blockingDuration > 10000) {
-          console.log(`Blocking cell (${position.x}, ${position.y}) for ${(blockingDuration/1000).toFixed(0)}s due to ${visitCount} visits${isInLoop ? ' (in loop)' : ''}`);
+        // Only log cell blocking with long durations (important for debugging)
+        if (blockingDuration > 10000) {
+          console.log(`Blocking cell (${position.x}, ${position.y}) for ${blockingDuration/1000}s due to ${visitCount} visits`);
         }
       }
       
@@ -1960,109 +1690,33 @@ function App() {
   function findEmergencyVisitedCell(x, y) {
     console.log("Looking for emergency visited cell");
     
-    // Check if we're in a critical loop situation
-    const loopStatus = detectLoop({x, y});
-    const isCriticalLoop = loopStatus && 
-      (loopStatus.severity === "critical" || 
-       loopStatus.requiresRandomEscape || 
-       (aiState.stuckCounter >= 15));
-    
-    // For critical loops, expand search beyond adjacent cells
-    const searchRadius = isCriticalLoop ? 3 : 1;
-    let candidateCells = [];
-    
-    // More aggressive search for escape paths in critical situations
-    for (let dy = -searchRadius; dy <= searchRadius; dy++) {
-      for (let dx = -searchRadius; dx <= searchRadius; dx++) {
-        // Skip current position
-        if (dx === 0 && dy === 0) continue;
-        
-        const adjX = x + dx;
-        const adjY = y + dy;
-        
-        // Check bounds
-        if (adjX < 0 || adjX >= 10 || adjY < 0 || adjY >= 10) continue;
-        
-        // Skip positions that definitely have dangers, unless we're desperate
-        if (aiKnowledge[adjY][adjX].definitelyDangerous && !isCriticalLoop) continue;
+    const adjacentCells = getAdjacentCells(x, y);
+    const visitableCells = adjacentCells
+      .map(([adjX, adjY]) => {
+        // Skip positions that definitely have dangers
+        if (aiKnowledge[adjY][adjX].definitelyDangerous) return null;
         
         // Get visit data
         const posKey = `${adjX},${adjY}`;
-        const recentPositions = aiState.visitedPositions.slice(-15); // Look at more history
+        const recentPositions = aiState.visitedPositions.slice(-8);
         const visitCount = aiState.visitedPositions.filter(pos => pos === posKey).length;
         const recentlyVisited = recentPositions.includes(posKey);
         
-        // Check if this is a direct neighbor or further away
-        const isAdjacent = Math.abs(dx) + Math.abs(dy) === 1;
-        
-        // Calculate Manhattan distance for prioritization
-        const distance = Math.abs(dx) + Math.abs(dy);
-        
-        // Calculate danger score
-        const dangerScore = aiKnowledge[adjY][adjX].possiblePit ? 10 : 0 + 
-                         aiKnowledge[adjY][adjX].possibleWumpus ? 15 : 0;
-        
-        // If we're in a critical situation, we need to consider all options
-        // but still prefer safer and less-visited cells
-        let scoreMultiplier = 1;
-        if (isCriticalLoop) {
-          // We're desperate, so reduce the visit penalty
-          scoreMultiplier = 0.5;
-          
-          // If this cell has never been visited, give it a big bonus
-          if (visitCount === 0) {
-            scoreMultiplier = 0.2;
-          }
-        }
-        
-        // Calculate final score (lower is better)
-        // In critical situations, we care less about visit count and more about finding new areas
-        const visitScore = visitCount * 2 * scoreMultiplier;
-        const recentScore = recentlyVisited ? 5 * scoreMultiplier : 0;
-        const distanceBonus = isCriticalLoop ? (10 - distance) : 0; // In critical mode, prefer distant cells
-        const dangerPenalty = isCriticalLoop ? dangerScore * 0.5 : dangerScore; // Reduce danger penalty in critical mode
-        
-        const score = visitScore + recentScore + dangerPenalty - distanceBonus;
-        
-        // In critical mode, add all cells; otherwise, only add adjacent cells
-        if (isCriticalLoop || isAdjacent) {
-          candidateCells.push({
-            x: adjX,
-            y: adjY,
-            visitCount,
-            recentlyVisited,
-            distance,
-            score,
-            isCritical: isCriticalLoop
-          });
-        }
-      }
-    }
+        return {
+          x: adjX,
+          y: adjY,
+          visitCount,
+          recentlyVisited,
+          // Score - lower is better
+          score: visitCount * 2 + (recentlyVisited ? 5 : 0)
+        };
+      })
+      .filter(cell => cell !== null)
+      .sort((a, b) => a.score - b.score); // Sort by score (lower is better)
     
-    // Sort by score (lower is better)
-    candidateCells.sort((a, b) => a.score - b.score);
-    
-    if (candidateCells.length > 0) {
-      const bestCell = candidateCells[0];
-      console.log(`Found emergency cell at (${bestCell.x}, ${bestCell.y}), score: ${bestCell.score.toFixed(1)}, critical mode: ${isCriticalLoop}`);
-      
-      // If this is a critical situation and we're selecting a non-adjacent cell,
-      // we need to plan a path to it
-      if (isCriticalLoop && bestCell.distance > 1) {
-        console.log(`Planning emergency path to (${bestCell.x}, ${bestCell.y})`);
-        
-        // Try to find a path to this cell
-        // Allow risky moves in critical situations
-        const emergencyPath = aStar({x, y}, {x: bestCell.x, y: bestCell.y}, aiKnowledge, true);
-        
-        if (emergencyPath && emergencyPath.length > 1) {
-          const nextStep = emergencyPath[1]; // First step after current position
-          console.log(`Taking first step of emergency path to (${nextStep.x}, ${nextStep.y})`);
-          return nextStep;
-        }
-      }
-      
-      return { x: bestCell.x, y: bestCell.y };
+    if (visitableCells.length > 0) {
+      console.log(`Found emergency visited cell at (${visitableCells[0].x}, ${visitableCells[0].y})`);
+      return { x: visitableCells[0].x, y: visitableCells[0].y };
     }
     
     return null;
@@ -2222,94 +1876,8 @@ function App() {
   }
 
   // Enhanced function to handle stuck situations with recovery attempts
-  // New helper function to make a random move when critically stuck
-  function makeRandomEscapeMove(x, y) {
-    console.log("EMERGENCY: Making random escape move to break critical loop");
-    
-    // Get all possible directions
-    const directions = ['up', 'down', 'left', 'right'];
-    
-    // Shuffle the directions randomly
-    for (let i = directions.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [directions[i], directions[j]] = [directions[j], directions[i]];
-    }
-    
-    // Try each direction in random order
-    for (const direction of directions) {
-      let newX = x;
-      let newY = y;
-      
-      if (direction === 'up') newY--;
-      if (direction === 'down') newY++;
-      if (direction === 'left') newX--;
-      if (direction === 'right') newX++;
-      
-      // Check if this move is within bounds
-      if (newX >= 0 && newX < 10 && newY >= 0 && newY < 10) {
-        console.log(`EMERGENCY ESCAPE: Moving ${direction} to (${newX}, ${newY})`);
-        handleMove(direction);
-        
-        // Temporarily reset some knowledge about this cell to force exploration
-        const newKnowledge = [...aiKnowledge];
-        newKnowledge[newY][newX].possiblePit = false;
-        newKnowledge[newY][newX].possibleWumpus = false;
-        setAiKnowledge(newKnowledge);
-        
-        return true;
-      }
-    }
-    
-    return false;
-  }
-
-  // Enhanced stuck situation handler with more aggressive recovery strategies
   function handleStuckSituation(x, y) {
     console.log("AI is potentially stuck at position:", x, y);
-    
-    // Check for critical loop situation
-    const loopStatus = detectLoop({x, y});
-    if (loopStatus && (loopStatus.severity === "critical" || loopStatus.requiresRandomEscape)) {
-      console.log("CRITICAL LOOP DETECTED: Initiating emergency recovery procedures");
-      
-      // 1. Try random escape move as a last resort
-      if (makeRandomEscapeMove(x, y)) {
-        return;
-      }
-      
-      // 2. If that fails, try more desperate measures
-      // Reset knowledge about dangerous cells in nearby areas
-      const resetRadius = 3;
-      console.log(`EMERGENCY: Temporarily resetting danger knowledge within ${resetRadius} cells`);
-      
-      const newKnowledge = [...aiKnowledge];
-      for (let dy = -resetRadius; dy <= resetRadius; dy++) {
-        for (let dx = -resetRadius; dx <= resetRadius; dx++) {
-          const nx = x + dx;
-          const ny = y + dy;
-          if (nx >= 0 && nx < 10 && ny >= 0 && ny < 10) {
-            // Only reset non-visited cells to preserve valid knowledge
-            if (!newKnowledge[ny][nx].visited) {
-              newKnowledge[ny][nx].possiblePit = false;
-              newKnowledge[ny][nx].possibleWumpus = false;
-              newKnowledge[ny][nx].safe = true; // Force as safe temporarily
-            }
-          }
-        }
-      }
-      setAiKnowledge(newKnowledge);
-      
-      // Clear blocked cells to allow revisiting
-      setAiState(prev => ({
-        ...prev,
-        blockedCells: {},
-        explorationMode: 'desperate',
-        stuckCounter: 0, // Reset counter after taking emergency action
-        lastEmergencyReset: Date.now()
-      }));
-      
-      return;
-    }
     
     // First try - attempt to make a risky move as a last resort
     if (aiState.stuckCounter < 15) {
@@ -2423,11 +1991,6 @@ function App() {
 
   // Enhanced useEffect for AI stepping with optimized performance
   useEffect(() => {
-    // Create a reference to track if the component is still mounted
-    let isMounted = true;
-    let stepTimeout = null;
-    let stepInterval = null;
-    
     if (gameMode === 'ai' && (simulationState === 'running' || simulationState === 'step')) {
       try {
         // Safety check - ensure all required AI state properties exist
@@ -2442,12 +2005,6 @@ function App() {
           return;
         }
         
-        // Check if the game is already won to prevent further actions
-        if (aiState.gameWon) {
-          console.log("Game already won, not starting AI step interval");
-          return;
-        }
-        
         // Minimal safety checks for critical properties
         if (!aiState.visitedPositions) {
           console.error('AI state missing visitedPositions property');
@@ -2457,39 +2014,32 @@ function App() {
         
         if (simulationState === 'step') {
           // Execute one step then stop
-          stepTimeout = setTimeout(() => {
-            if (isMounted && !aiState.gameWon) {
-              try {
-                aiStep();
-                setSimulationState('paused');
-              } catch (error) {
-                console.error('Error in AI step execution:', error);
-                setSimulationState('paused');
-              }
+          setTimeout(() => {
+            try {
+              aiStep();
+              setSimulationState('paused');
+            } catch (error) {
+              console.error('Error in AI step execution:', error);
+              setSimulationState('paused');
             }
           }, 10);
         } else if (simulationState === 'running') {
           // Continuous execution
-          stepInterval = setInterval(() => {
-            if (isMounted && !aiState.gameWon) {
-              try {
-                aiStep();
-              } catch (error) {
-                console.error('Error in AI step:', error);
-                setSimulationState('paused');
-                showGamePopup(
-                  `⚠️ AI Error!\nAn error occurred during AI execution.\nSimulation paused for safety.\nError: ${error.message}`,
-                  null,
-                  'wumpus'
-                );
-                
-                if (stepInterval) {
-                  clearInterval(stepInterval);
-                  stepInterval = null;
-                }
-              }
+          const interval = setInterval(() => {
+            try {
+              aiStep();
+            } catch (error) {
+              console.error('Error in AI step:', error);
+              setSimulationState('paused');
+              showGamePopup(
+                `⚠️ AI Error!\nAn error occurred during AI execution.\nSimulation paused for safety.\nError: ${error.message}`,
+                null,
+                'wumpus'
+              );
+              clearInterval(interval);
             }
           }, 250); // 250ms per step for faster exploration
+          return () => clearInterval(interval);
         }
       } catch (error) {
         console.error('Error in useEffect:', error);
@@ -2499,22 +2049,6 @@ function App() {
           null,
           'wumpus'
         );
-      }
-    }
-    
-    // Cleanup function to clear all timers and intervals when component unmounts
-    // or when dependencies change
-    return () => {
-      isMounted = false;
-      
-      if (stepTimeout) {
-        clearTimeout(stepTimeout);
-        stepTimeout = null;
-      }
-      
-      if (stepInterval) {
-        clearInterval(stepInterval);
-        stepInterval = null;
       }
     }
   }, [gameMode, simulationState, gameState, aiKnowledge, aiState]);
@@ -3254,34 +2788,10 @@ function App() {
   function findBalancedExplorationMove(x, y) {
     const adjacentCells = getAdjacentCells(x, y);
     
-    // Check for extreme desperation where we need to take risks
-    const isExtremelyStuck = aiState.stuckCounter > 18 && 
-                             aiState.explorationMode === 'desperate' && 
-                             detectLoop({x, y});
-    
-    // If extremely stuck, consider evaluating adjacent cells that might be risky too
-    const potentialMoves = adjacentCells.filter(([adjX, adjY]) => {
-      // Basic validity check
-      if (adjX < 0 || adjX >= 10 || adjY < 0 || adjY >= 10) return false;
-      
-      const cell = aiKnowledge[adjY][adjX];
-      
-      // In extreme cases, be willing to consider any non-pit cell
-      if (isExtremelyStuck) {
-        // Even in extreme desperation, never consider obvious pit cells
-        return !cell.possiblePit;
-      } else {
-        // Normal safety check
-        return isMoveBalancedSafe(x, y, adjX, adjY);
-      }
+    // Find all safe moves using enhanced validation
+    const balancedSafeMoves = adjacentCells.filter(([adjX, adjY]) => {
+      return isMoveBalancedSafe(x, y, adjX, adjY);
     });
-    
-    // Find all safe moves using enhanced validation (for normal operation)
-    const balancedSafeMoves = isExtremelyStuck ? 
-      potentialMoves : // Use the potentially risky moves if extremely stuck
-      adjacentCells.filter(([adjX, adjY]) => {
-        return isMoveBalancedSafe(x, y, adjX, adjY);
-      });
     
     // Among safe moves, strongly prefer unvisited ones
     const unvisitedSafeMoves = balancedSafeMoves.filter(([adjX, adjY]) => {
@@ -3310,12 +2820,7 @@ function App() {
         return best;
       }, null);
       
-      // If this is a desperate move, log it clearly
-      if (isExtremelyStuck && aiKnowledge[bestMove.y][bestMove.x].possibleWumpus) {
-        console.log(`DESPERATE EXPLORATION: Taking calculated risk to (${bestMove.x}, ${bestMove.y}) despite possible dangers`);
-      } else {
-        console.log(`Enhanced exploration move selected: (${bestMove.x}, ${bestMove.y}) with score ${bestMove.score}`);
-      }
+      console.log(`Enhanced exploration move selected: (${bestMove.x}, ${bestMove.y}) with score ${bestMove.score}`);
       return { x: bestMove.x, y: bestMove.y };
     }
     
@@ -3380,25 +2885,8 @@ function App() {
     
     // For Wumpus cells, we need more nuanced handling
     if (targetCell.possibleWumpus) {
-      // Check for desperate situation - extremely stuck in a loop
-      const isDesperatelySeverStuck = aiState.explorationMode === 'desperate' && 
-                                    aiState.stuckCounter > 18 &&
-                                    detectLoop({ x: fromX, y: fromY });
-      
-      if (isDesperatelySeverStuck) {
-        // In extreme cases, we'll take the risk to break out of a loop
-        // Note: We'll still never move into a confirmed pit
-        console.log(`DESPERATE MODE: Considering risky move to (${toX}, ${toY}) despite possible wumpus!`);
-        
-        // Return true 50% of the time in this desperate situation
-        if (Math.random() > 0.5) {
-          console.log(`TAKING CALCULATED RISK to break out of severe loop - moving to (${toX}, ${toY})`);
-          return true;
-        }
-      }
-      
       if (!gameState.hasArrow) {
-        // Without an arrow, we should normally NEVER move to a wumpus cell
+        // Without an arrow, we should NEVER move to a wumpus cell under any circumstance
         console.log(`REJECTING move to (${toX}, ${toY}) - possible wumpus detected and no arrow available!`);
         
         // Additionally mark this area as high-risk in the AI state to avoid getting stuck
