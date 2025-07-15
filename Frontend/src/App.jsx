@@ -123,6 +123,7 @@ function App() {
     returningHome: false,
     visitedPositions: [], // Track recent positions for loop detection
     stuckCounter: 0, // Count how many times AI couldn't find new moves
+    gameWon: false, // Flag to track if the game has been won
     explorationMode: 'normal', // normal, aggressive, desperate
     lastGoldHint: null, // Store last position where we detected a gold hint
     globalExploredCount: 0, // Track total explored cells
@@ -1045,6 +1046,11 @@ function App() {
   // Optimized AI Step for faster gold discovery
   function aiStep() {
     try {
+      // Check if the game is already won to prevent further actions
+      if (aiState.gameWon) {
+        return; // Exit immediately if the game is already won
+      }
+      
       // Clear forced exploration update flag and reset avoidance center after some steps
       if (aiState.forcedExplorationUpdate && aiState.globalExploredCount % 10 === 0) {
         setAiState(prev => ({
@@ -1197,8 +1203,21 @@ function App() {
       if (gameState.hasGold && x === 0 && y === 9) {
         console.log("AI won the game!");
         
+        // Add a flag to aiState to track that the game is already won
+        // to prevent showing multiple popups
+        if (aiState.gameWon) {
+          console.log("Game already won, skipping victory popup");
+          return;
+        }
+        
         // Immediately stop the simulation to prevent multiple popups
         setSimulationState('stopped');
+        
+        // Mark the game as won in the AI state
+        setAiState(prev => ({
+          ...prev,
+          gameWon: true
+        }));
         
         // Calculate final score manually to ensure it's accurate
         // The score includes: -1 per move, -10 per arrow, +1000 for gold
@@ -2404,6 +2423,11 @@ function App() {
 
   // Enhanced useEffect for AI stepping with optimized performance
   useEffect(() => {
+    // Create a reference to track if the component is still mounted
+    let isMounted = true;
+    let stepTimeout = null;
+    let stepInterval = null;
+    
     if (gameMode === 'ai' && (simulationState === 'running' || simulationState === 'step')) {
       try {
         // Safety check - ensure all required AI state properties exist
@@ -2418,6 +2442,12 @@ function App() {
           return;
         }
         
+        // Check if the game is already won to prevent further actions
+        if (aiState.gameWon) {
+          console.log("Game already won, not starting AI step interval");
+          return;
+        }
+        
         // Minimal safety checks for critical properties
         if (!aiState.visitedPositions) {
           console.error('AI state missing visitedPositions property');
@@ -2427,32 +2457,39 @@ function App() {
         
         if (simulationState === 'step') {
           // Execute one step then stop
-          setTimeout(() => {
-            try {
-              aiStep();
-              setSimulationState('paused');
-            } catch (error) {
-              console.error('Error in AI step execution:', error);
-              setSimulationState('paused');
+          stepTimeout = setTimeout(() => {
+            if (isMounted && !aiState.gameWon) {
+              try {
+                aiStep();
+                setSimulationState('paused');
+              } catch (error) {
+                console.error('Error in AI step execution:', error);
+                setSimulationState('paused');
+              }
             }
           }, 10);
         } else if (simulationState === 'running') {
           // Continuous execution
-          const interval = setInterval(() => {
-            try {
-              aiStep();
-            } catch (error) {
-              console.error('Error in AI step:', error);
-              setSimulationState('paused');
-              showGamePopup(
-                `⚠️ AI Error!\nAn error occurred during AI execution.\nSimulation paused for safety.\nError: ${error.message}`,
-                null,
-                'wumpus'
-              );
-              clearInterval(interval);
+          stepInterval = setInterval(() => {
+            if (isMounted && !aiState.gameWon) {
+              try {
+                aiStep();
+              } catch (error) {
+                console.error('Error in AI step:', error);
+                setSimulationState('paused');
+                showGamePopup(
+                  `⚠️ AI Error!\nAn error occurred during AI execution.\nSimulation paused for safety.\nError: ${error.message}`,
+                  null,
+                  'wumpus'
+                );
+                
+                if (stepInterval) {
+                  clearInterval(stepInterval);
+                  stepInterval = null;
+                }
+              }
             }
           }, 250); // 250ms per step for faster exploration
-          return () => clearInterval(interval);
         }
       } catch (error) {
         console.error('Error in useEffect:', error);
@@ -2462,6 +2499,22 @@ function App() {
           null,
           'wumpus'
         );
+      }
+    }
+    
+    // Cleanup function to clear all timers and intervals when component unmounts
+    // or when dependencies change
+    return () => {
+      isMounted = false;
+      
+      if (stepTimeout) {
+        clearTimeout(stepTimeout);
+        stepTimeout = null;
+      }
+      
+      if (stepInterval) {
+        clearInterval(stepInterval);
+        stepInterval = null;
       }
     }
   }, [gameMode, simulationState, gameState, aiKnowledge, aiState]);
