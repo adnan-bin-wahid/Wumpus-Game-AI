@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import './App.css'
 import KnowledgeBase from './components/KnowledgeBase'
 import WumpusGrid from './components/WumpusGrid'
+import './components/ScoreDisplay.css'
 
 // Game configuration
 const gameConfig = {
@@ -60,6 +61,7 @@ function App() {
   const [pitSound] = useState(new Audio('/pit.mp3'));
   const [wumpusSound] = useState(new Audio('/wumpus.mp3'));
   const [transitionSound] = useState(new Audio('/transition.mp3'));
+  const [score, setScore] = useState(0); // Add score state for performance tracking
   const [percepts, setPercepts] = useState({
     breeze: false,
     stench: false,
@@ -669,8 +671,22 @@ function App() {
       // 2. If we have gold and at start position, climb out
       if (gameState.hasGold && x === 0 && y === 9) {
         console.log("AI won the game!");
-        showGamePopup("🎉 Congratulations! You won! 🏆\nYou got the gold and made it back safely! 🌟", goldSound);
+        
+        // Immediately stop the simulation to prevent multiple popups
         setSimulationState('stopped');
+        
+        // Calculate final score manually to ensure it's accurate
+        // The score includes: -1 per move, -10 per arrow, +1000 for gold
+        const calculatedScore = score + 1000;  // Add gold bonus if it wasn't added before
+        
+        // Show victory popup with longer delay before returning to home
+        showGamePopup(`🎉 Congratulations! You won! 🏆\nYou got the gold and made it back safely! 🌟\nFinal Score: ${calculatedScore}`, goldSound);
+        
+        // Return to home page after a longer delay (5 seconds)
+        setTimeout(() => {
+          setGameMode(null); // Return to home page only after delay
+        }, 5000);
+        
         return;
       }
       
@@ -1451,28 +1467,38 @@ function App() {
 
   const handlePopupClose = () => {
     setShowPopup(false);
-    // Only restart if the game is actually over (not alive) and not returning to home
-    if (!gameState.isAlive && gameMode !== null) {
+    
+    // Check if this was a gold victory popup (continue gameplay) or a death popup (restart)
+    const isGoldVictory = popupContent.type === 'gold';
+    
+    // Only restart if the game is over due to death (not gold victory)
+    if (!gameState.isAlive && !isGoldVictory && gameMode !== null) {
       handleRestart();
     }
+    
     backgroundMusic.play();
   };
 
   // Popup component
-  const Popup = ({ message, onClose, type = 'default' }) => (
-    <div className="popup-overlay">
-      <div className={`popup-content ${type === 'gold' ? 'popup-gold' : ''}`}>
-        <div className="popup-header">
-          <h2>{message}</h2>
-        </div>
-        <div className="popup-actions">
-          <button className="control-btn restart popup-restart" onClick={onClose}>
-            🔄 Restart Game
-          </button>
+  const Popup = ({ message, onClose, type = 'default' }) => {
+    // For gold victory messages, show a Continue button instead of Restart
+    const isVictory = type === 'gold' && (message.includes("Congratulations") || message.includes("You won"));
+    
+    return (
+      <div className="popup-overlay">
+        <div className={`popup-content ${type === 'gold' ? 'popup-gold' : ''}`}>
+          <div className="popup-header">
+            <h2>{message}</h2>
+          </div>
+          <div className="popup-actions">
+            <button className="control-btn restart popup-restart" onClick={onClose}>
+              {isVictory ? '🎮 Continue' : '🔄 Restart Game'}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   // Update percepts when player moves
   const updatePercepts = (position) => {
@@ -1585,14 +1611,13 @@ function App() {
         grid: newGrid,
       }));
       
-      // Show victory popup and pause the game
-      showGamePopup("🏆 Congratulations! You found the gold! ✨💰\n🎉 Returning to home...", goldSound, 'gold');
+      // Show victory popup and pause the game with current score
+      // Calculate the score directly to include the +1000 gold bonus
+      const calculatedScore = score + 1000; // Include gold bonus
+      showGamePopup(`🏆 Congratulations! You found the gold! ✨💰\n� Continue playing to return home!\nCurrent Score: ${calculatedScore}`, goldSound, 'gold');
       
-      // Pause the simulation and return to home after a short delay
-      setTimeout(() => {
-        setSimulationState('stopped');
-        setGameMode(null); // Return to home page
-      }, 1000); // 2 second delay to show the victory message
+      // Immediately stop simulation to prevent multiple messages
+      setSimulationState('stopped');
       
       return;
     }
@@ -1600,6 +1625,9 @@ function App() {
     // Check for death conditions
     const newCell = newGrid[newPosition.y][newPosition.x];
     if (newCell.wumpus || newCell.pit) {
+      // Deduct 1000 points for death
+      setScore(prevScore => prevScore - 1000);
+      
       setGameState(prev => ({
         ...prev,
         playerPosition: newPosition,
@@ -1608,8 +1636,8 @@ function App() {
       }));
       showGamePopup(
         newCell.wumpus 
-          ? "☠️ Game Over! The Wumpus got you! 👾" 
-          : "💀 Game Over! You fell into a pit! 🕳️",
+          ? `☠️ Game Over! The Wumpus got you! 👾\nFinal Score: ${score - 1000}` 
+          : `💀 Game Over! You fell into a pit! 🕳️\nFinal Score: ${score - 1000}`,
         newCell.wumpus ? wumpusSound : pitSound,
         newCell.wumpus ? 'wumpus' : 'pit'
       );
@@ -1623,7 +1651,13 @@ function App() {
         playerPosition: newPosition,
         grid: newGrid,
       }));
-      showGamePopup("🎉 Congratulations! You won! 🏆\nYou got the gold and made it back safely! 🌟", goldSound);
+      
+      // Make sure we include the gold bonus in the final score
+      // This ensures we show the correct score even if state updates haven't completed yet
+      const calculatedScore = score + 1000; // Make sure gold bonus is included
+      
+      showGamePopup(`🎉 Congratulations! You won! 🏆\nYou got the gold and made it back safely! 🌟\nFinal Score: ${calculatedScore}`, goldSound, 'gold');
+      
       return;
     }
 
@@ -1633,6 +1667,10 @@ function App() {
       playerPosition: newPosition,
       grid: newGrid
     }));
+    
+    // Decrease score by 1 for each move
+    setScore(prevScore => prevScore - 1);
+    
     updatePercepts(newPosition);
   };
 
@@ -1838,6 +1876,8 @@ function App() {
   // Reset AI state when game restarts
   const handleRestart = () => {
     setSimulationState('stopped');
+    // Reset score to 0 when restarting
+    setScore(0);
     setAiState({
       hasShot: false,
       wumpusKilled: false,
@@ -1883,6 +1923,9 @@ function App() {
 
   const handleShoot = () => {
     if (!gameState.hasArrow || !gameState.isAlive) return;
+
+    // Decrease score by 10 for using arrow
+    setScore(prevScore => prevScore - 10);
 
     const { x, y, facing } = gameState.playerPosition;
     let hitWumpus = false;
@@ -1945,6 +1988,9 @@ function App() {
     const cell = gameState.grid[y][x];
     
     if (cell.gold) {
+      // Add 1000 points for finding gold
+      setScore(prevScore => prevScore + 1000);
+      
       const newGrid = gameState.grid.map((row, rowIndex) =>
         row.map((cell, colIndex) => ({
           ...cell,
@@ -1956,17 +2002,26 @@ function App() {
         ...prev,
         hasGold: true,
         grid: newGrid,
-        message: "✨ You got the gold! Game paused. Returning to home..."
+        message: "✨ You got the gold!"
       }));
       
-      // Show victory popup and pause the game
-      showGamePopup("🏆 Congratulations! You found the gold! ✨💰\n🎉 Game paused. Returning to home...", goldSound, 'gold');
-      
-      // Pause the simulation and return to home after a short delay
-      setTimeout(() => {
-        setSimulationState('stopped');
-        setGameMode(null); // Return to home page
-      }, 2000); // 2 second delay to show the victory message
+      if (gameMode !== 'ai') {
+        // Manual mode - show victory popup with score and pause the game
+        // Calculate the score directly to include the +1000 gold bonus
+        const calculatedScore = score + 1000;
+        showGamePopup(`🏆 Congratulations! You found the gold! ✨💰\n� Continue playing to return home!\nCurrent Score: ${calculatedScore}`, goldSound, 'gold');
+      } else {
+        // AI mode - avoid showing popup here, it will be shown in aiStep when returning home
+        // Only track state change - prevents duplicate messages
+        console.log("AI found gold, now returning to home");
+        
+        // Set AI to return home without showing a popup yet
+        setAiState(prev => ({
+          ...prev,
+          searchingForGold: false,
+          returningHome: true
+        }));
+      }
     }
   };  // STRICT safe moves finder - even more aggressive loop avoidance
   function findSafeAdjacentMoves(x, y) {
@@ -2181,11 +2236,23 @@ function App() {
       <div className="game-container">
         <h1>Wumpus World</h1>
         <div className="mode-selection">
-          <button className="mode-btn ai" onClick={() => setGameMode('ai')}>
+          <button 
+            className="mode-btn ai" 
+            onClick={() => {
+              setGameMode('ai');
+              setScore(0); // Reset score when starting a new game
+            }}
+          >
             <span className="icon">🤖</span>
             AI Mode
           </button>
-          <button className="mode-btn manual" onClick={() => setGameMode('manual')}>
+          <button 
+            className="mode-btn manual" 
+            onClick={() => {
+              setGameMode('manual');
+              setScore(0); // Reset score when starting a new game
+            }}
+          >
             <span className="icon">👤</span>
             Manual Mode
           </button>
@@ -2208,6 +2275,15 @@ function App() {
           />
         </div>
         <div className="game-sidebar">
+          <div className="score-display">
+            <h3>Score: {score}</h3>
+            <p className="score-info">
+              • Move: -1 point<br/>
+              • Arrow: -10 points<br/>
+              • Gold: +1000 points<br/>
+              • Death: -1000 points
+            </p>
+          </div>
           <KnowledgeBase percepts={percepts} />
           
           {gameMode === 'manual' ? (
@@ -2294,6 +2370,9 @@ function App() {
                 style={{ display: 'none' }}
               />
             </label>
+            <button className="control-btn home" onClick={() => setGameMode(null)}>
+              🏠 Return to Home
+            </button>
           </div>
         </div>
       </div>

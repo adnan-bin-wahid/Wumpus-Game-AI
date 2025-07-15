@@ -409,8 +409,11 @@ h1 {
   color: #fff !important;
   text-shadow: 3px 3px 6px rgba(0, 0, 0, 0.5),
                0 0 10px rgba(255, 255, 255, 0.3) !important;
-  font-size: 32px !important;
+  font-size: 36px !important; /* Increased font size */
+  line-height: 1.4 !important; /* Better line height */
   animation: textGlow 1.5s ease-in-out infinite alternate !important;
+  white-space: pre-wrap !important; /* Preserve line breaks */
+  font-weight: bold !important;
 }
 
 @keyframes goldGlow {
