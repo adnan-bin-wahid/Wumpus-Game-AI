@@ -148,13 +148,7 @@ function App() {
     
     // ENHANCEMENT 8: Zone-based exploration
     zoneExplorationPriority: [0, 1, 2, 3], // Default priority order
-    zoneBlockingTime: {0: 0, 1: 0, 2: 0, 3: 0}, // Time until a zone is unblocked
-    
-    // ENHANCEMENT 9: Avoidance mechanics for no-arrow scenario
-    avoidanceAreas: {}, // Map of positions to avoid (like wumpus cells when we have no arrow)
-    avoidanceCenter: null, // Center of an area to avoid (like where we detected a stench with no arrow)
-    avoidanceRadius: 0, // How far to stay away from the avoidance center
-    forcedExplorationUpdate: false // Flag to force a recalculation of exploration targets
+    zoneBlockingTime: {0: 0, 1: 0, 2: 0, 3: 0} // Time until a zone is unblocked
   });
 
   // Initialize grid with game elements
@@ -350,20 +344,7 @@ function App() {
     
     // High penalties for dangerous cells but not impossible
     if (cell.possiblePit) penalty += allowRisky ? 15 : 100;
-    
-    // Much higher penalty for Wumpus cells if we don't have an arrow
-    if (cell.possibleWumpus) {
-      // If we've killed a wumpus, reduce penalty as we've confirmed our ability to do so
-      if (aiState.wumpusKilled) {
-        penalty += allowRisky ? 10 : 50; // Reduced penalty if we've proven we can kill a wumpus
-      } else if (!gameState.hasArrow) {
-        // Without an arrow, wumpus cells should be treated as completely impassable
-        penalty += allowRisky ? 500 : 9999; // Extremely high penalty - effectively making it impossible
-      } else {
-        // Normal penalty if we have an arrow and haven't killed a wumpus yet
-        penalty += allowRisky ? 20 : 150;
-      }
-    }
+    if (cell.possibleWumpus && !aiState.wumpusKilled) penalty += allowRisky ? 20 : 150;
     
     // Unknown cells get minimal penalty to encourage exploration
     if (!cell.safe && !cell.visited && !cell.possiblePit && !cell.possibleWumpus) {
@@ -646,11 +627,6 @@ function App() {
     // Track blocked cells
     const blockedCells = aiState.blockedCells || {};
     
-    // Get avoidance information
-    const avoidanceAreas = aiState.avoidanceAreas || {};
-    const avoidanceCenter = aiState.avoidanceCenter;
-    const avoidanceRadius = aiState.avoidanceRadius || 0;
-
     for (let y = 0; y < 10; y++) {
       for (let x = 0; x < 10; x++) {
         const posKey = `${x},${y}`;
@@ -664,19 +640,6 @@ function App() {
         // ENHANCEMENT 7: Stronger blocking - skip cells that are temporarily blocked
         if (blockedCells[posKey] && blockedCells[posKey] > currentTime) {
           continue;
-        }
-        
-        // ENHANCEMENT 9: Skip cells in avoidance areas (for no-arrow wumpus avoidance)
-        if (avoidanceAreas[posKey]) {
-          continue;
-        }
-        
-        // ENHANCEMENT 9: Skip cells too close to avoidance center (stench with no arrow)
-        if (avoidanceCenter && avoidanceRadius > 0) {
-          const avoidanceDistance = heuristic({ x, y }, avoidanceCenter);
-          if (avoidanceDistance <= avoidanceRadius) {
-            continue;
-          }
         }
         
         // Calculate important values for this cell
@@ -905,16 +868,6 @@ function App() {
   // Optimized AI Step for faster gold discovery
   function aiStep() {
     try {
-      // Clear forced exploration update flag and reset avoidance center after some steps
-      if (aiState.forcedExplorationUpdate && aiState.globalExploredCount % 10 === 0) {
-        setAiState(prev => ({
-          ...prev,
-          forcedExplorationUpdate: false,
-          avoidanceCenter: null,
-          avoidanceRadius: 0
-        }));
-      }
-    
       if (!gameState.isAlive || simulationState === 'stopped') return;
       
       const { x, y } = gameState.playerPosition;
@@ -1011,24 +964,10 @@ function App() {
           } else {
             console.log("AI shooting arrow!");
             handleShoot();
-            // Update AI state to mark that we've used our arrow and killed a wumpus
             setAiState(prev => ({ ...prev, hasShot: true, wumpusKilled: true }));
             return;
           }
         }
-      } else if (percepts.stench && !gameState.hasArrow) {
-        // If we sense a stench but have no arrow, mark this as a dangerous area but continue exploration
-        console.log("AI detected stench but has no arrow - marking as dangerous and continuing exploration");
-        // Update knowledge base to mark adjacent cells as potentially containing wumpus
-        
-        // Since we can't shoot, we need to be more aggressive about finding alternative paths
-        // Force an update to the exploration targets to prioritize cells away from this area
-        setAiState(prev => ({
-          ...prev,
-          forcedExplorationUpdate: true,
-          avoidanceCenter: { x, y },
-          avoidanceRadius: 2
-        }));
       }
       
       // 4. BALANCED EXPLORATION - more aggressive but still safe
@@ -1924,11 +1863,6 @@ function App() {
 
   // Helper function to find the best shooting target
   function findBestShootingTarget(currentX, currentY) {
-    // If agent doesn't have an arrow, don't even consider shooting
-    if (!gameState.hasArrow) {
-      return null;
-    }
-
     const adjacentCells = getAdjacentCells(currentX, currentY);
     const suspiciousCells = adjacentCells.filter(([adjX, adjY]) => 
       aiKnowledge[adjY][adjX].possibleWumpus && !aiKnowledge[adjY][adjX].visited
@@ -2799,37 +2733,10 @@ function App() {
       return true;
     }
     
-    // Handle pits and Wumpus cells separately for clearer logic
-    
-    // NEVER safe: pit cells - always reject these regardless of other conditions
-    if (targetCell.possiblePit) {
-      console.log(`REJECTING move to (${toX}, ${toY}) - possible pit detected!`);
+    // NEVER safe: confirmed dangerous cells
+    if (targetCell.possiblePit || (targetCell.possibleWumpus && !aiState.wumpusKilled)) {
+      console.log(`REJECTING move to (${toX}, ${toY}) - possible danger detected!`);
       return false;
-    }
-    
-    // For Wumpus cells, we need more nuanced handling
-    if (targetCell.possibleWumpus) {
-      if (!gameState.hasArrow) {
-        // Without an arrow, we should NEVER move to a wumpus cell under any circumstance
-        console.log(`REJECTING move to (${toX}, ${toY}) - possible wumpus detected and no arrow available!`);
-        
-        // Additionally mark this area as high-risk in the AI state to avoid getting stuck
-        const position = {x: toX, y: toY};
-        const posKey = `${toX},${toY}`;
-        
-        // Ensure we don't revisit this area by marking it in our avoidance map
-        setAiState(prev => ({
-          ...prev,
-          avoidanceAreas: {...(prev.avoidanceAreas || {}), [posKey]: true}
-        }));
-        
-        return false;
-      } else if (!aiState.wumpusKilled) {
-        // With an arrow but no confirmed kill yet, still reject
-        console.log(`REJECTING move to (${toX}, ${toY}) - possible wumpus detected!`);
-        return false;
-      }
-      // If we've killed a wumpus and have aiState.wumpusKilled set, we might take the risk
     }
     
     // Enhanced logic: Allow risky moves if adjacent safe cells are mostly visited
