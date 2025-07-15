@@ -750,6 +750,15 @@ function App() {
           console.log(`AI returning home: ${direction}`);
           handleMove(direction);
           return;
+        } else if (x === 0 && y === 9) {
+          // Agent has reached starting cell, trigger victory
+          setSimulationState('stopped');
+          const calculatedScore = score + 1000;
+          showGamePopup(`🎉 Congratulations! You won! 🏆\nYou got the gold and made it back safely! 🌟\nFinal Score: ${calculatedScore}`, goldSound);
+          setTimeout(() => {
+            setGameMode(null);
+          }, 5000);
+          return;
         }
       }
       
@@ -1983,14 +1992,14 @@ function App() {
 
   const handleGrab = () => {
     if (!gameState.isAlive) return;
-    
+
     const { x, y } = gameState.playerPosition;
     const cell = gameState.grid[y][x];
-    
+
     if (cell.gold) {
       // Add 1000 points for finding gold
       setScore(prevScore => prevScore + 1000);
-      
+
       const newGrid = gameState.grid.map((row, rowIndex) =>
         row.map((cell, colIndex) => ({
           ...cell,
@@ -2004,26 +2013,27 @@ function App() {
         grid: newGrid,
         message: "✨ You got the gold!"
       }));
-      
+
+      // When gold is collected, set AI to return home using shortest and safest path
+      setAiState(prev => ({
+        ...prev,
+        searchingForGold: false,
+        returningHome: true,
+        // Set agent to return to start position (0,9)
+        plan: [],
+        currentPlanIndex: 0
+      }));
+
       if (gameMode !== 'ai') {
         // Manual mode - show victory popup with score and pause the game
-        // Calculate the score directly to include the +1000 gold bonus
         const calculatedScore = score + 1000;
-        showGamePopup(`🏆 Congratulations! You found the gold! ✨💰\n� Continue playing to return home!\nCurrent Score: ${calculatedScore}`, goldSound, 'gold');
+        showGamePopup(`🏆 Congratulations! You found the gold! ✨💰\n Continue playing to return home!\nCurrent Score: ${calculatedScore}`, goldSound, 'gold');
       } else {
         // AI mode - avoid showing popup here, it will be shown in aiStep when returning home
-        // Only track state change - prevents duplicate messages
-        console.log("AI found gold, now returning to home");
-        
-        // Set AI to return home without showing a popup yet
-        setAiState(prev => ({
-          ...prev,
-          searchingForGold: false,
-          returningHome: true
-        }));
+        console.log("AI found gold, planning shortest and safest return to home");
       }
     }
-  };  // STRICT safe moves finder - even more aggressive loop avoidance
+  };
   function findSafeAdjacentMoves(x, y) {
     const adjacentCells = getAdjacentCells(x, y);
     const allSafeMoves = adjacentCells.filter(([adjX, adjY]) => {

@@ -51,12 +51,18 @@ const WumpusGrid = ({ grid, playerPosition, hasArrow = true, onShoot, onMove, is
       return content; // Return empty array to allow player image to be rendered separately
     }
     
+    // Add start emoji to the starting position (0,9)
+    if (x === 0 && y === 9) {
+      content.push('🏁');
+    }
+    
     // In AI mode, show all elements regardless of visited status
     // In manual mode, only show contents for visited cells
     const shouldShowContent = isAIMode || cell?.visited;
     
     if (!shouldShowContent) {
-      return ''; // Return empty string for covered cells in manual mode
+      // Still show start emoji even in covered cells
+      return content.join(' ') || '';
     }
 
     // Show contents based on mode
